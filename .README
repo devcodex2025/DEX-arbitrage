@@ -1,0 +1,102 @@
+Ось приклад README для вашого проєкту, чисто та структуровано:
+
+---
+
+# Arbitrage Scanner for Solana DEXes
+
+This project is a Node.js script that scans for potential arbitrage opportunities between Jupiter and Meteora decentralized exchanges on Solana. It allows you to dynamically select a base token (e.g., USDC, USDT, SOL) and calculates potential profit spreads when swapping tokens.
+
+## Features
+
+* Fetches token swap quotes from Jupiter API.
+* Fetches token prices from Meteora API.
+* Computes potential profit/spread between buying on Jupiter and selling on Meteora.
+* Supports dynamic base token selection via `.env`.
+* Saves results to an Excel file for easy analysis.
+
+## Prerequisites
+
+* Node.js v18+
+* NPM or Yarn
+* Jupiter API key
+* `tokens.json` file containing the list of tokens with their mints and decimals.
+
+## Installation
+
+1. Clone the repository:
+
+```bash
+git clone <repository_url>
+cd <repository_folder>
+```
+
+2. Install dependencies:
+
+```bash
+npm install
+```
+
+3. Create a `.env` file with the following variables:
+
+```
+JUP_API_KEY=<your_jupiter_api_key>
+BASE_TOKEN_MINT=<mint_address_of_base_token>
+BASE_TOKEN_SYMBOL=<symbol_of_base_token>
+BASE_AMOUNT=100
+```
+
+* `BASE_TOKEN_MINT` – mint address of the base token (e.g., USDC, SOL).
+* `BASE_TOKEN_SYMBOL` – symbol of the base token.
+* `BASE_AMOUNT` – amount of the base token to use for each scan.
+
+4. Prepare `tokens.json` with token data in the format:
+
+```json
+[
+  {
+    "symbol": "SOL",
+    "mint": "So11111111111111111111111111111111111111112",
+    "decimals": 9
+  },
+  {
+    "symbol": "PUMP",
+    "mint": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
+    "decimals": 6
+  }
+]
+```
+
+## Usage
+
+Run the script:
+
+```bash
+node arb-scanner.js
+```
+
+The script will:
+
+1. Fetch the Jupiter quote for each token against the base token.
+2. Fetch the Meteora price for each token.
+3. Calculate the profit/spread in normal token units.
+4. Output results to the console.
+5. Save results to `arb_scan_tokens.xlsx`.
+
+## Notes
+
+* The script includes a delay between API calls to avoid rate-limiting.
+* Spread/profit calculations are in **normal token units**, not atomic units.
+* You can change the base token dynamically via the `.env` file without modifying the code.
+
+## Dependencies
+
+* [node-fetch](https://www.npmjs.com/package/node-fetch) – for API requests
+* [dotenv](https://www.npmjs.com/package/dotenv) – for environment variables
+* [xlsx](https://www.npmjs.com/package/xlsx) – to export results to Excel
+* [fs](https://nodejs.org/api/fs.html) – file system module to read `tokens.json`
+
+---
+
+If you want, I can also add a **diagram of the workflow** for the README to make it more visual and easier to understand.
+
+Do you want me to add it?

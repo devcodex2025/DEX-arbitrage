@@ -17,7 +17,7 @@ async function fetchTopTokens() {
       decimals: t.decimals || 0
     }));
 
-    fs.writeFileSync("./tokens.json", JSON.stringify(tokens, null, 2));
+    fs.writeFileSync("./data/tokens.json", JSON.stringify(tokens, null, 2));
     console.log(`Saved ${tokens.length} top tokens to tokens.json`);
   } catch (err) {
     console.error("Error fetching top tokens:", err.message);

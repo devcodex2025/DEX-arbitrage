@@ -1,9 +1,6 @@
 import fs from "fs";
-import path from "path";
-import XLSX from "xlsx";
 import { getJupiterQuote } from "./Api/Jupiter.js";
 import { getMeteoraQuote, getMeteoraPairs } from "./Api/Meteora.js";
-import { calculateSpreadLamports } from "./Calculations/spreadCalculation.js";
 import { BASE_TOKEN_MINT, BASE_TOKEN_SYMBOL, BASE_AMOUNT, DELAY_MS, TOKENS_FILE, RESULTS_FOLDER, BASE_TOKEN_LAMPORTS } from "./Config/config.js";
 import { saveResultsToExcel } from "./utils/saveResultsToExcel.js";
 
@@ -17,14 +14,18 @@ let allTokens = JSON.parse(fs.readFileSync(TOKENS_FILE, "utf-8"))
 // ====== ОТРИМАННЯ СПІЛЬНИХ ТОКЕНІВ ======
 async function getCommonTokens() {
   console.log("Fetching available Meteora pairs...");
-  const meteoraMints = await getMeteoraPairs(BASE_TOKEN_MINT);
+  const meteoraPairs = await getMeteoraPairs(BASE_TOKEN_MINT); // тепер об’єкт tokenMint → pairAddres
 
-  if (!meteoraMints || meteoraMints.length === 0) {
+  if (!meteoraPairs || meteoraPairs.length === 0) {
     console.log("⚠️ No Meteora pairs found — scanning all tokens instead...");
-    return allTokens;
+    return allTokens.map(t => ({ ...t, meteoraPair: null })); // якщо пар немає
   }
 
-  const filtered = allTokens.filter(t => meteoraMints.includes(t.mint));
+  // залишаємо тільки токени, що є в об’єкті meteoraPairs і підв’язуємо адресу пари
+  const filtered = allTokens
+    .filter(t => meteoraPairs[t.mint])
+    .map(t => ({ ...t, meteoraPair: meteoraPairs[t.mint] }));
+
   console.log(`✅ Found ${filtered.length} common tokens on Jupiter & Meteora.`);
   return filtered;
 }
@@ -52,9 +53,13 @@ async function scanArb() {
     );
 
     await new Promise(r => setTimeout(r, DELAY_MS));
-
+    const pairAddress = token.meteoraPair;
+    if (!pairAddress) {
+      console.log(`No Meteora pair for ${token.symbol}, skipping...`);
+      continue;
+    }
     // Розрахунок зворотного свапу через Meteora
-    const sellAmountLamports = await getMeteoraQuote(token.mint, tokenAmountJupiter, token.decimals);
+    const sellAmountLamports = await getMeteoraQuote(pairAddress, tokenAmountJupiter, token.decimals);
     console.log(`sellAmountLamports: ${sellAmountLamports}`);
     if (!sellAmountLamports) {
       console.log(`Price for ${token.symbol} not available on Meteora, skipping...`);

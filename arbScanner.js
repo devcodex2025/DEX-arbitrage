@@ -23,10 +23,18 @@ async function getCommonTokens() {
 
   // залишаємо тільки токени, що є в об’єкті meteoraPairs і підв’язуємо адресу пари
   const filtered = allTokens
-    .filter(t => meteoraPairs[t.mint])
-    .map(t => ({ ...t, meteoraPair: meteoraPairs[t.mint] }));
+    .filter(t => {
+      const pairInfo = meteoraPairs[t.mint]
+      if (!pairInfo) return false;
+      // Фільтр по ліквідності: reserve_y_amount >= BASE_AMOUNT_LAMPORTS і достатня ліквідність
+      return pairInfo.reserve_y_amount >= BASE_AMOUNT_LAMPORTS;
+    })
+    .map(t => ({
+      ...t,
+      meteoraPairAddress: meteoraPairs[t.mint].address // підв’язуємо адресу пари
+    }));
 
-  console.log(`✅ Found ${filtered.length} common tokens on Jupiter & Meteora.`);
+  console.log(`✅ Found ${filtered.length} common & liquid tokens on Jupiter & Meteora.`);
   return filtered;
 }
 
@@ -53,7 +61,7 @@ async function scanArb() {
     );
 
     await new Promise(r => setTimeout(r, DELAY_MS));
-    const pairAddress = token.meteoraPair;
+    const pairAddress = token.meteoraPairAddress;
     if (!pairAddress) {
       console.log(`No Meteora pair for ${token.symbol}, skipping...`);
       continue;

@@ -21,13 +21,16 @@ export async function getMeteoraPairs(baseMint) {
       // ✅ Беремо тільки ті пари, де baseMint є другим (mint_y)
       // і перший токен (mint_x) є у нашому файлі tokens.json
       if (pair.mint_y === baseMint && knownMints.has(pair.mint_x)) {
-        tokenToPair[pair.mint_x] = pair.address;
+        tokenToPair[pair.mint_x] = {
+          address: pair.address,
+          reserve_y_amount: pair.reserve_y_amount // ліквідність базового токена у Lamports
+        }
       }
     }
     // Вивід у консоль
     console.log("Available Tokens and their Meteora Pairs:");
-    Object.entries(tokenToPair).forEach(([mint, address], index) => {
-      console.log(`${index + 1}. Token: ${mint}, Pair Address: ${address}`);
+    Object.entries(tokenToPair).forEach(([mint, info], index) => {
+      console.log(`${index + 1}. Token: ${mint}, Pair Address: ${info.address}`);
     });
 
     console.log(`✅ Found ${Object.keys(tokenToPair).length} tokens with pairs on Meteora.`);

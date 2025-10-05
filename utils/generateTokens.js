@@ -3,11 +3,8 @@ import fetch from "node-fetch";
 
 async function fetchTopTokens() {
   try {
-    const limit = 100;
-    const interval = "5m";
-    const category = "toporganicscore";
-
-    const url = `https://lite-api.jup.ag/tokens/v2/${category}/${interval}?limit=${limit}`;
+    const tag = "verified";
+    const url = `https://lite-api.jup.ag/tokens/v2/tag?query=${tag}`;
     const res = await fetch(url);
     const tokensArray = await res.json(); // тут сам масив
 

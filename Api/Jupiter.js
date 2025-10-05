@@ -1,4 +1,5 @@
 import { JUP_API_KEY } from "../Config/config.js";
+import Decimal from "decimal.js";
 
 const SLIPPAGE_BPS = process.env.SLIPPAGE_BPS || 50;
 
@@ -27,6 +28,7 @@ export async function getJupiterQuote(inMint, outMint, amount) {
         const data = await res.json();
         return { raw: data, outAmount: data.outAmount ? new Decimal(data.outAmount) : null };
     } catch (err) {
+        console.error(err.message);
         return { raw: { error: err.message }, outAmount: null };
     }
 }

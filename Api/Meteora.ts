@@ -74,8 +74,7 @@ interface QuoteResult {
 
 export async function getMeteoraQuote(
   poolAddress: string,
-  amountLamports: number,
-  baseTokenMint: string
+  BASE_TOKEN_LAMPORTS_AMOUNT: number
 ): Promise<BN | null> {
 
 
@@ -83,12 +82,12 @@ export async function getMeteoraQuote(
   const cpAmm = new CpAmm(connection);
 
   try {
-    const AddressPool = new PublicKey('8Pm2kZpnxD3hoMmt4bjStX2Pw2Z9abpbHzZxMPqxPmie');
+    const AddressPool = new PublicKey(poolAddress);
     const poolState = await cpAmm.fetchPoolState(AddressPool);
     const currentSlot = await connection.getSlot();
     const blockTime = await connection.getBlockTime(currentSlot) ?? Math.floor(Date.now() / 1000);
-    const usdcMint = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
-    const usdtMint = new PublicKey('Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB');
+    const tokenAmintPbkey = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+    const tokenBMintPbkey = new PublicKey('Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB');
 
     // отримуємо інформацію про токени
     const inputMintInfo = await getMint(connection, usdcMint);
@@ -102,7 +101,7 @@ export async function getMeteoraQuote(
     const currentEpochNumber = epochInfo.epoch;
 
     const quote = cpAmm.getQuote({
-      inAmount: new BN(100_000_000), // 100 USDC
+      inAmount: new BN(BASE_TOKEN_LAMPORTS_AMOUNT), // 100 USDC
       inputTokenMint: usdcMint,
       slippage: 0.5, // 0.5% slippage
       poolState,

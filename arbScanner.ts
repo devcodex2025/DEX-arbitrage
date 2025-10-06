@@ -123,7 +123,6 @@ async function scanArb() {
 
     console.log(`Spent: ${lamportsSpent} Lamports, Received: ${lamportsReceived} Lamports, Profit: ${profitPercent.toFixed(2)}%`);
 
-
     console.log(
       `${token.symbol} → ${BASE_TOKEN_SYMBOL} (Meteora): ${sellAmountLamports} Lamports (≈ ${sellDisplay} ${BASE_TOKEN_SYMBOL})`
     );

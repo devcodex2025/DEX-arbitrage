@@ -8,7 +8,7 @@ import {
   DELAY_MS,
   TOKENS_FILE,
   RESULTS_FOLDER,
-  BASE_TOKEN_LAMPORTS
+  BASE_TOKEN_LAMPORTS_AMOUNT
 } from "./Config/config.js";
 import { saveResultsToExcel } from "./utils/saveResultsToExcel.js";
 
@@ -40,7 +40,7 @@ interface ResultRow {
 }
 
 // Конвертуємо BASE_AMOUNT у Lamports
-const BASE_AMOUNT_LAMPORTS = BASE_AMOUNT * BASE_TOKEN_LAMPORTS;
+const BASE_AMOUNT_LAMPORTS = BASE_AMOUNT * BASE_TOKEN_LAMPORTS_AMOUNT;
 
 // Завантажуємо токени з файлу, виключаючи базовий токен
 const allTokens: Token[] = JSON.parse(fs.readFileSync(TOKENS_FILE, "utf-8")).filter(
@@ -103,14 +103,15 @@ async function scanArb() {
       continue;
     }
     // Розрахунок зворотного свапу через Meteora
-    const sellAmountLamports: number | null | undefined  = await getMeteoraQuote(pairAddress, token.mint);
+    const sellAmountLamports: number | null | undefined  = await getMeteoraQuote(pairAddress, BASE_TOKEN_LAMPORTS_AMOUNT);
     console.log(`sellAmountLamports: ${sellAmountLamports}`);
+    break;
     if (!sellAmountLamports) {
       console.log(`Price for ${token.symbol} not available on Meteora, skipping...`);
       continue;
     }
 
-    const sellDisplay = Number(sellAmountLamports) / BASE_TOKEN_LAMPORTS;
+    const sellDisplay = Number(sellAmountLamports) / BASE_TOKEN_LAMPORTS_AMOUNT;
     // Скільки Lamports витрачено на купівлю токена
     const lamportsSpent = BASE_AMOUNT_LAMPORTS;
 
@@ -144,7 +145,6 @@ async function scanArb() {
       profitPercent: profitPercent.toFixed(2),
       source: "Meteora",
     });
-    break; // зупиняє цикл після першої ітерації
   }
 
   saveResultsToExcel(results, RESULTS_FOLDER);

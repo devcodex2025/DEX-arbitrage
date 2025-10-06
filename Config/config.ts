@@ -12,5 +12,5 @@ export const DELAY_MS = 1200;
 export const TOKENS_FILE = "./data/tokens.json";
 export const RESULTS_FOLDER = "./data/results";
 export const BASE_TOKEN_DECIMALS = parseInt(process.env.BASE_TOKEN_DECIMALS || "9");
-export const BASE_TOKEN_LAMPORTS = 10 ** BASE_TOKEN_DECIMALS;
+export const BASE_TOKEN_LAMPORTS_AMOUNT = 10 ** BASE_TOKEN_DECIMALS;
 export const RPC_ENDPOINT = process.env.RPC_ENDPOINT;

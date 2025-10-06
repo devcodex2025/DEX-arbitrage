@@ -61,9 +61,9 @@ async function getCommonTokens(): Promise<Token[]> {
   const filtered = allTokens
     .filter(t => {
       const pairInfo = meteoraPairs[t.mint]
-      if (!pairInfo) return false;
+      return !!pairInfo;
       // Фільтр по ліквідності: reserve_y_amount >= BASE_AMOUNT_LAMPORTS і достатня ліквідність
-      return pairInfo.reserve_y_amount >= BASE_AMOUNT_LAMPORTS;
+      //return pairInfo.reserve_y_amount >= BASE_AMOUNT_LAMPORTS;
     })
     .map(t => ({
       ...t,
@@ -105,7 +105,7 @@ async function scanArb() {
     // Розрахунок зворотного свапу через Meteora
     const sellAmountLamports: number | null | undefined  = await getMeteoraQuote(pairAddress, BASE_TOKEN_LAMPORTS_AMOUNT);
     console.log(`sellAmountLamports: ${sellAmountLamports}`);
-    break;
+    //break;
     if (!sellAmountLamports) {
       console.log(`Price for ${token.symbol} not available on Meteora, skipping...`);
       continue;

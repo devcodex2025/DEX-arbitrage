@@ -1,5 +1,6 @@
 import { BASE_TOKEN_SYMBOL, BASE_TOKEN_MINT, BASE_TOKEN_LAMPORTS_AMOUNT, DELAY_MS } from "../Config/config";
 import { getJupiterQuote } from "../Api/Jupiter";
+import BN from "bn.js";
 
 interface Token {
   mint: string;
@@ -26,7 +27,7 @@ export default async function scanTokenPairs({
   results,
 }: {
   tokens: Token[];
-  getMeteoraQuoteFn: (pairAddress: string, amountLamports: number) => Promise<number | null | undefined>;
+  getMeteoraQuoteFn: (pairAddress: string, amountLamports: number) => Promise<BN | null | undefined>;
   source: string; // ✅ універсальне значення
   results: ScanResult[]; // масив, куди будемо додавати записи
 }) {
@@ -36,16 +37,16 @@ export default async function scanTokenPairs({
 
     // Jupiter quote
     const jupiterQuote = await getJupiterQuote(BASE_TOKEN_MINT, token.mint, BASE_TOKEN_LAMPORTS_AMOUNT);
-    if (!jupiterQuote.outAmount) {
+    if (!jupiterQuote) {
       console.log(`Failed to buy ${token.symbol} on Jupiter.`);
       continue;
     }
-
+    const lamportsReceived = Number(jupiterQuote.outAmount);
     const TOKEN_LAMPORTS = 10 ** token.decimals;
-    const tokenAmountJupiter = Number(jupiterQuote.outAmount);
-    const tokenDisplay = tokenAmountJupiter / TOKEN_LAMPORTS;
+    //const lamportsReceived = Number(jupiterQuote.outAmount);
+    const tokenDisplay = lamportsReceived / TOKEN_LAMPORTS;
 
-    console.log(`${BASE_TOKEN_SYMBOL} → ${token.symbol} (Jupiter): ${tokenAmountJupiter} Lamports (≈ ${tokenDisplay} ${token.symbol})`);
+    console.log(`${BASE_TOKEN_SYMBOL} → ${token.symbol} (Jupiter): ${lamportsReceived} Lamports (≈ ${tokenDisplay} ${token.symbol})`);
 
     await new Promise(r => setTimeout(r, DELAY_MS));
 
@@ -56,22 +57,23 @@ export default async function scanTokenPairs({
     }
 
     // Зворотний свап через вказану модель
-    const sellAmountLamports = await getMeteoraQuoteFn(pairAddress, tokenAmountJupiter);
+    const sellAmountLamports = await getMeteoraQuoteFn(pairAddress, lamportsReceived);
     if (!sellAmountLamports) {
       console.log(`Price for ${token.symbol} not available on ${source}, skipping...`);
       continue;
     }
+    console.log(`sell amount (Lamports): ${sellAmountLamports}`);
+    const sellAmountLamportsNum = sellAmountLamports instanceof BN ? sellAmountLamports.toNumber() : sellAmountLamports;
+    const sellDisplay = sellAmountLamportsNum / BASE_TOKEN_LAMPORTS_AMOUNT;
+    const profitPercent = (( sellAmountLamportsNum - BASE_TOKEN_LAMPORTS_AMOUNT) / BASE_TOKEN_LAMPORTS_AMOUNT) * 100;
 
-    const sellDisplay = sellAmountLamports / BASE_TOKEN_LAMPORTS_AMOUNT;
-    const profitPercent = ((sellAmountLamports - BASE_TOKEN_LAMPORTS_AMOUNT) / BASE_TOKEN_LAMPORTS_AMOUNT) * 100;
-
-    console.log(`Spent: ${tokenAmountJupiter} Lamports, Received: ${sellAmountLamports} Lamports, Profit: ${profitPercent.toFixed(2)}%`);
+    console.log(`Spent: ${lamportsReceived} Lamports, Received: ${sellAmountLamports} Lamports, Profit: ${profitPercent.toFixed(2)}%`);
     console.log(`${token.symbol} → ${BASE_TOKEN_SYMBOL} (${source}): ${sellAmountLamports} Lamports (≈ ${sellDisplay} ${BASE_TOKEN_SYMBOL})`);
 
     // Без змін у логіці збереження
     results.push({
       pair: `${BASE_TOKEN_SYMBOL} / ${token.symbol}`,
-      buyAmount_lamports: tokenAmountJupiter.toString(),
+      buyAmount_lamports: lamportsReceived.toString(),
       tokenAmount_display: tokenDisplay.toString(),
       sellAmount_lamports: sellAmountLamports.toString(),
       sellAmount_display: sellDisplay.toString(),

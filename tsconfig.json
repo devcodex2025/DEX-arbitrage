@@ -2,13 +2,25 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "Bundler", // Changed from "node" for better ESM support
     "outDir": "./dist",
     "rootDir": "./",
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "sourceMap": true,
+    "skipLibCheck": true, // Added to bypass @meteora-ag .d.ts errors
+    "allowJs": true
   },
-  "include": ["**/*.ts"]
+  "ts-node": {
+    "esm": true,
+    "swc": true
+  },
+  "include": [
+    "**/*.ts" // Include all .ts files in all subdirectories
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

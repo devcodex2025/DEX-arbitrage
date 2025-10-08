@@ -1,129 +1,128 @@
 import fs from "fs";
 import fetch from "node-fetch";
 import { TOKENS_FILE, RPC_ENDPOINT, SLIPPAGE_BPS, BASE_TOKEN_MINT } from "../Config/config.js"
-import { CpAmm } from "@meteora-ag/cp-amm-sdk";
+import DLMM from '@meteora-ag/dlmm'
 import { Connection, PublicKey } from '@solana/web3.js';
 import BN from "bn.js";
 import { getMint } from "@solana/spl-token";
 
 interface MeteoraPairInfo {
-  address: string;
-  liquidity: number; // ліквідність базового токена у Lamports
+    address: string;
+    liquidity: number; // ліквідність базового токена у Lamports
 }
 
 export async function getMeteoraPairsDLMM(baseMint: string) {
-  interface Token {
-    mint: string;
-    symbol: string;
-    decimals: number;
-    meteoraPairAddress?: string | null;
-  }
-
-  try {
-    const allTokens: Token[] = JSON.parse(fs.readFileSync(TOKENS_FILE, "utf-8"));
-    const knownMints = new Set(allTokens.map(t => t.mint));
-    const tokenToPair: Record<string, MeteoraPairInfo> = {};
-
-    const limit = 100;
-    const MAX_PAGES = 100; // безпечний максимум (змінюй якщо треба)
-    const urls: string[] = [];
-
-    // 🔹 Формуємо список усіх сторінок для запиту
-    for (let offset = 0; offset < limit * MAX_PAGES; offset += limit) {
-      urls.push(`https://dammv2-api.meteora.ag/pools?tokens_verified=true&limit=${limit}&offset=${offset}`);
+    interface Token {
+        mint: string;
+        symbol: string;
+        decimals: number;
+        meteoraPairAddress?: string | null;
     }
 
-    // 🔹 Виконуємо запити паралельно (до 5 одночасно, щоб не перевантажити API)
-    const concurrency = 5;
-    for (let i = 0; i < urls.length; i += concurrency) {
-      const batch = urls.slice(i, i + concurrency);
-      const responses = await Promise.allSettled(batch.map(url => fetch(url)));
+    try {
+        const allTokens: Token[] = JSON.parse(fs.readFileSync(TOKENS_FILE, "utf-8"));
+        const knownMints = new Set(allTokens.map(t => t.mint));
+        const tokenToPair: Record<string, MeteoraPairInfo> = {};
 
-      for (const res of responses) {
-        if (res.status !== "fulfilled") continue;
-        const data = await res.value.json();
-        const poolsList = data.data;
-        if (!poolsList || poolsList.length === 0) continue;
+        const limit = 100;
+        const MAX_PAGES = 5; // безпечний максимум
+        const concurrency = 5; // скільки сторінок запитуємо одночасно
+        let page = 0;
+        let keepFetching = true;
 
-        for (const pair of poolsList) {
-          // ✅ Фільтруємо лише релевантні пули
-          if (pair.token_b_mint === baseMint && knownMints.has(pair.token_a_mint)) {
-            tokenToPair[pair.token_a_mint] = {
-              address: pair.pool_address,
-              liquidity: pair.liquidity // ліквідність базового токена у Lamports
-            };
-          }
+        while (keepFetching && page < MAX_PAGES) {
+            const batchPages = Array.from({ length: concurrency }, (_, i) => page + i);
+
+            const responses = await Promise.allSettled(
+                batchPages.map(p =>
+                    fetch(`https://dlmm-api.meteora.ag/pair/all_with_pagination?include_unknown=false&limit=${limit}&page=${p}`)
+                )
+            );
+
+            let anyData = false;
+
+            for (let i = 0; i < responses.length; i++) {
+                const res = responses[i];
+                const currentPage = batchPages[i];
+
+                if (res.status !== "fulfilled") continue;
+
+                const data = await res.value.json();
+                const pairs = data.pairs;
+                const total = data.total;
+
+                if (!pairs || total === 0) continue;
+
+                anyData = true;
+
+                for (const pair of pairs) {
+                    if (pair.mint_y === baseMint && knownMints.has(pair.mint_x)) {
+                        tokenToPair[pair.mint_x] = {
+                            address: pair.address,
+                            liquidity: pair.liquidity
+                        };
+                    }
+                }
+
+                console.log(`page number: ${currentPage}, total pairs: ${total}`);
+            }
+
+            if (!anyData) {
+                keepFetching = false; // зупиняємося, якщо жодної пари не знайдено
+            }
+
+            page += concurrency; // переходимо до наступного батчу сторінок
+            await new Promise(r => setTimeout(r, 100)); // коротка пауза між батчами
         }
-      }
 
-      // ⏳ Коротка пауза між батчами (щоб не зловити rate limit)
-      await new Promise(r => setTimeout(r, 200));
+        console.log(`✅ Found ${Object.keys(tokenToPair).length} tokens with pairs on Meteora DLMM.`);
+        return tokenToPair;
+
+    } catch (err) {
+        console.error("❌ Error fetching Meteora pairs:", (err as Error)?.message ?? err);
+        return {};
     }
-
-    console.log(`✅ Found ${Object.keys(tokenToPair).length} tokens with pairs on Meteora.`);
-    return tokenToPair;
-  } catch (err) {
-    console.error("❌ Error fetching Meteora pairs:", (err as Error)?.message ?? err);
-    return {};
-  }
 }
 
+
+
 interface QuoteResult {
-  outputAmount: number;
-  minOutputAmount: number;
-  priceImpact: number;
-  fee: number;
+    outputAmount: number;
+    minOutputAmount: number;
+    priceImpact: number;
+    fee: number;
 }
 
 export async function getMeteoraQuoteDLMM(
-  poolAddress: string,
-  lamportAmount: number
+    poolAddress: string,
+    lamportAmount: number
 ): Promise<BN | null> {
 
+    const poolAdressPubkey = new PublicKey("ARwi1S4DaiTG5DX7S4M4ZsrXqpMD1MrTmbu9ue2tpmEq");
 
-  const connection = new Connection("https://api.mainnet-beta.solana.com");
-  const cpAmm = new CpAmm(connection);
+    const connection = new Connection("https://api.mainnet-beta.solana.com");
+    const dLMM = await DLMM.create(connection, poolAdressPubkey);
+    console.log('DLMM Pool Info:', dLMM);
+    return null; // тимчасово, поки не налагоджено
 
-  try {
-    const AddressPool = new PublicKey(poolAddress);
-    const poolState = await cpAmm.fetchPoolState(AddressPool);
-    const currentSlot = await connection.getSlot();
-    const blockTime = await connection.getBlockTime(currentSlot) ?? Math.floor(Date.now() / 1000);
-    const tokenAMintPbkey = poolState.tokenAMint;
-    const tokenBMintPbkey = poolState.tokenBMint;
+    try {
+        const inAmount = new BN(lamportAmount);
+        const swapForY = true; // або false, залежно від напрямку свапу
+        const allowedSlippage = new BN(50); // 0.5% = 50 bps
+        const binArrays = dLMM.getBinArrayForSwap; // масив BinArrayAccount з пулу
 
-    // отримуємо інформацію про токени
-    const inputMintInfo = await getMint(connection, tokenAMintPbkey);
-    const outputMintInfo = await getMint(connection, tokenBMintPbkey);
-
-    const tokenADecimal = inputMintInfo.decimals;
-    const tokenBDecimal = outputMintInfo.decimals;
-
-    // поточний епох
-    const epochInfo = await connection.getEpochInfo();
-    const currentEpochNumber = epochInfo.epoch;
-
-    const quote = cpAmm.getQuote({
-      inAmount: new BN(lamportAmount),
-      inputTokenMint: tokenAMintPbkey,
-      slippage: 0.5, // 0.5% slippage
-      poolState,
-      currentTime: blockTime,
-      currentSlot,
-      inputTokenInfo: {
-        mint: inputMintInfo,      // об'єкт типу Mint (отриманий через getMint)
-        currentEpoch: currentEpochNumber, // number
-      },
-      outputTokenInfo: {
-        mint: outputMintInfo,     // також об'єкт типу Mint
-        currentEpoch: currentEpochNumber, // number
-      },
-      tokenADecimal,
-      tokenBDecimal,
-    });
-    return quote.swapOutAmount;
-  } catch (err: unknown) {
-    console.error('❌ Unexpected error in getMeteoraQuote:', err instanceof Error ? err.message : err);
-    return null;
-  }
+        const quote = dLMM.swapQuote(
+            inAmount,
+            swapForY,
+            allowedSlippage,
+            binArrays,
+            false, // isPartialFill
+            0      // maxExtraBinArrays
+        );
+        // отримуємо кількість Lamports після свапу
+        return quote.outAmount ?? null;
+    } catch (err: unknown) {
+        console.error('❌ Unexpected error in getMeteoraQuote:', err instanceof Error ? err.message : err);
+        return null;
+    }
 }

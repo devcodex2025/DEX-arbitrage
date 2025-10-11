@@ -50,7 +50,7 @@ await scanTokenPairs({
   getMeteoraQuoteFn: getMeteoraQuoteDAMMV2,
   source: "MeteoraDAMMV2",
   results,
-  checkForward: false,
+  checkForward: true,
   checkReverse: true // новий прапорець
 });
 

@@ -77,7 +77,8 @@ interface QuoteResult {
 
 export async function getMeteoraQuoteDAMMV2(
   poolAddress: string,
-  lamportAmount: number
+  lamportAmount: number,
+  isReverse = false
 ): Promise<BN | null> {
 
 
@@ -89,15 +90,20 @@ export async function getMeteoraQuoteDAMMV2(
     const poolState = await cpAmm.fetchPoolState(AddressPool);
     const currentSlot = await connection.getSlot();
     const blockTime = await connection.getBlockTime(currentSlot) ?? Math.floor(Date.now() / 1000);
-    const tokenAMintPbkey = poolState.tokenAMint;
-    const tokenBMintPbkey = poolState.tokenBMint;
+    let tokenAMintPbkey = poolState.tokenAMint;
+    let tokenBMintPbkey = poolState.tokenBMint;
+
+    if (isReverse) {
+      tokenAMintPbkey = poolState.tokenBMint;
+      tokenBMintPbkey = poolState.tokenAMint;
+    }
 
     // отримуємо інформацію про токени
     const inputMintInfo = await getMint(connection, tokenAMintPbkey);
     const outputMintInfo = await getMint(connection, tokenBMintPbkey);
-
     const tokenADecimal = inputMintInfo.decimals;
     const tokenBDecimal = outputMintInfo.decimals;
+
 
     // поточний епох
     const epochInfo = await connection.getEpochInfo();

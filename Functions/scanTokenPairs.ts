@@ -121,26 +121,25 @@ async function scanReverse(
   token: Token,
   TOKEN_LAMPORTS: number,
   pairAddress: string,
-  getMeteoraQuoteFn: (pairAddress: string, amountLamports: number) => Promise<BN | null | undefined>,
+  getMeteoraQuoteFn: (pairAddress: string, amountLamports: number, isReverse: boolean) => Promise<BN | null | undefined>,
   source: string,
   results: ScanResult[]
 ) {
-  console.log(`\n🔁 Checking ${source} → Jupiter for ${token.symbol}`);
-
-
-  const meteoraBuy = await getMeteoraQuoteFn(pairAddress, BASE_TOKEN_LAMPORTS_AMOUNT);
-
-  console.log(`Pair: ${pairAddress}, amount: ${BASE_TOKEN_LAMPORTS_AMOUNT}`);
-  console.log(`Meteora quote result:`, meteoraBuy);
-  
+  // Функція затримки
+  function sleep(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+  await sleep(1200);
+  // 1️⃣ Купуємо токен на Meteora
+  const meteoraBuy = await getMeteoraQuoteFn(pairAddress, BASE_TOKEN_LAMPORTS_AMOUNT, true);
   if (!meteoraBuy) {
     console.log(`Reverse buy not available for ${token.symbol}`);
     return;
   }
-
   const tokenAmountFromMeteora = meteoraBuy instanceof BN ? meteoraBuy.toNumber() : Number(meteoraBuy);
+  console.log(`Bought on Meteora: ${tokenAmountFromMeteora} units of ${token.symbol}`);
 
-  // Продаємо токен на Jupiter
+  // 2️⃣ Продаємо токен на Jupiter
   const jupiterSell = await getJupiterQuote(token.mint, BASE_TOKEN_MINT, tokenAmountFromMeteora);
   if (!jupiterSell) {
     console.log(`Reverse sell not available for ${token.symbol}`);
@@ -150,6 +149,10 @@ async function scanReverse(
   const sellDisplayReverse = sellAmountReverse / BASE_TOKEN_LAMPORTS_AMOUNT;
   const profitPercentReverse = ((sellAmountReverse - BASE_TOKEN_LAMPORTS_AMOUNT) / BASE_TOKEN_LAMPORTS_AMOUNT) * 100;
 
+  console.log(`Sold on Jupiter: ${sellAmountReverse} Lamports`);
+  console.log(`Profit vs initial: ${profitPercentReverse.toFixed(2)}%`);
+
+  // 3️⃣ Зберігаємо результат
   results.push({
     pair: `${BASE_TOKEN_SYMBOL} / ${token.symbol}`,
     buyAmount_lamports: BASE_TOKEN_LAMPORTS_AMOUNT.toString(),

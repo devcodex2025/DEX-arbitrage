@@ -10,13 +10,13 @@ interface Token {
 }
 
 interface ScanResult {
-  pair: string;               // "SOL / BONK"
-  buyAmount_lamports: string; // витрачені Lamports на покупку
-  tokenAmount_display: string;// токен у зручному форматі
-  sellAmount_lamports: string; // отримані Lamports після продажу
-  sellAmount_display: string;  // відображення проданого токена у базовій валюті
-  profitPercent: string;       // прибуток у %
-  source: string;              // "MeteoraDAMMV2", "MeteoraDLMM", ...
+  pair: string;
+  buyAmount_lamports: string;
+  tokenAmount_display: string;
+  sellAmount_lamports: string;
+  sellAmount_display: string;
+  profitPercent: string;
+  source: string;
 }
 
 
@@ -25,60 +25,138 @@ export default async function scanTokenPairs({
   getMeteoraQuoteFn,
   source,
   results,
+  checkForward = true,
+  checkReverse = true,
 }: {
   tokens: Token[];
   getMeteoraQuoteFn: (pairAddress: string, amountLamports: number) => Promise<BN | null | undefined>;
-  source: string; // ✅ універсальне значення
-  results: ScanResult[]; // масив, куди будемо додавати записи
+  source: string;
+  results: ScanResult[];
+  checkForward?: boolean;
+  checkReverse?: boolean;
 }) {
   for (const token of tokens) {
-    console.log(`\n--- Scanning ${BASE_TOKEN_SYMBOL} / ${token.symbol} (${source}) ---`);
-    console.log(`Base token mint: ${BASE_TOKEN_MINT}, Token mint: ${token.mint}, Base amount (Lamports): ${BASE_TOKEN_LAMPORTS_AMOUNT}`);
+    try {
+      console.log(`\n--- Scanning ${BASE_TOKEN_SYMBOL} / ${token.symbol} (${source}) ---`);
+      const pairAddress = token.meteoraPairAddress;
+      if (!pairAddress) {
+        console.log(`No ${source} pair for ${token.symbol}, skipping...`);
+        continue;
+      }
 
-    // Jupiter quote
-    const jupiterQuote = await getJupiterQuote(BASE_TOKEN_MINT, token.mint, BASE_TOKEN_LAMPORTS_AMOUNT);
-    if (!jupiterQuote) {
-      console.log(`Failed to buy ${token.symbol} on Jupiter.`);
-      continue;
+      const TOKEN_LAMPORTS = 10 ** token.decimals;
+
+      // === 1️⃣ Напрямок: Jupiter → Meteora ===
+      if (checkForward) {
+        await scanForward(token, TOKEN_LAMPORTS, pairAddress, getMeteoraQuoteFn, source, results);
+      }
+
+      // === 2️⃣ Напрямок: Meteora → Jupiter ===
+      if (checkReverse) {
+        await scanReverse(token, TOKEN_LAMPORTS, pairAddress, getMeteoraQuoteFn, source, results);
+      }
+    } catch (err: any) {
+      console.error(`Error scanning ${token.symbol}:`, err.message);
     }
-    const lamportsReceived = Number(jupiterQuote.outAmount);
-    const TOKEN_LAMPORTS = 10 ** token.decimals;
-    //const lamportsReceived = Number(jupiterQuote.outAmount);
-    const tokenDisplay = lamportsReceived / TOKEN_LAMPORTS;
-
-    console.log(`${BASE_TOKEN_SYMBOL} → ${token.symbol} (Jupiter): ${lamportsReceived} Lamports (≈ ${tokenDisplay} ${token.symbol})`);
-
-    await new Promise(r => setTimeout(r, DELAY_MS));
-
-    const pairAddress = token.meteoraPairAddress;
-    if (!pairAddress) {
-      console.log(`No ${source} pair for ${token.symbol}, skipping...`);
-      continue;
-    }
-
-    // Зворотний свап через вказану модель
-    const sellAmountLamports = await getMeteoraQuoteFn(pairAddress, lamportsReceived);
-    if (!sellAmountLamports) {
-      console.log(`Price for ${token.symbol} not available on ${source}, skipping...`);
-      continue;
-    }
-    console.log(`sell amount (Lamports): ${sellAmountLamports}`);
-    const sellAmountLamportsNum = sellAmountLamports instanceof BN ? sellAmountLamports.toNumber() : sellAmountLamports;
-    const sellDisplay = sellAmountLamportsNum / BASE_TOKEN_LAMPORTS_AMOUNT;
-    const profitPercent = (( sellAmountLamportsNum - BASE_TOKEN_LAMPORTS_AMOUNT) / BASE_TOKEN_LAMPORTS_AMOUNT) * 100;
-
-    console.log(`Spent: ${lamportsReceived} Lamports, Received: ${sellAmountLamports} Lamports, Profit: ${profitPercent.toFixed(2)}%`);
-    console.log(`${token.symbol} → ${BASE_TOKEN_SYMBOL} (${source}): ${sellAmountLamports} Lamports (≈ ${sellDisplay} ${BASE_TOKEN_SYMBOL})`);
-
-    // Без змін у логіці збереження
-    results.push({
-      pair: `${BASE_TOKEN_SYMBOL} / ${token.symbol}`,
-      buyAmount_lamports: lamportsReceived.toString(),
-      tokenAmount_display: tokenDisplay.toString(),
-      sellAmount_lamports: sellAmountLamports.toString(),
-      sellAmount_display: sellDisplay.toString(),
-      profitPercent: profitPercent.toFixed(2),
-      source, // ✅ динамічно додаємо назву моделі
-    });
   }
+}
+
+
+// === 1️⃣ Функція для напрямку Jupiter → Meteora ===
+async function scanForward(
+  token: Token,
+  TOKEN_LAMPORTS: number,
+  pairAddress: string,
+  getMeteoraQuoteFn: (pairAddress: string, amountLamports: number) => Promise<BN | null | undefined>,
+  source: string,
+  results: ScanResult[]
+) {
+  console.log(`\n➡️ Checking Jupiter → ${source} for ${token.symbol}`);
+  const jupiterQuote = await getJupiterQuote(BASE_TOKEN_MINT, token.mint, BASE_TOKEN_LAMPORTS_AMOUNT);
+  if (!jupiterQuote) {
+    console.log(`Failed to get Jupiter quote for ${token.symbol}`);
+    return;
+  }
+  const lamportsReceived = Number(jupiterQuote.outAmount);
+  //const lamportsReceived = Number(jupiterQuote.outAmount);
+  const tokenDisplay = lamportsReceived / TOKEN_LAMPORTS;
+
+  console.log(`${BASE_TOKEN_SYMBOL} → ${token.symbol} (Jupiter): ${lamportsReceived} Lamports (≈ ${tokenDisplay} ${token.symbol})`);
+
+  await new Promise(r => setTimeout(r, DELAY_MS));
+
+  if (!pairAddress) {
+    console.log(`No ${source} pair for ${token.symbol}, skipping...`);
+    return;
+  }
+
+  // Зворотний свап через вказану модель
+  const sellAmountLamports = await getMeteoraQuoteFn(pairAddress, lamportsReceived);
+  if (!sellAmountLamports) {
+    console.log(`Price for ${token.symbol} not available on ${source}, skipping...`);
+    return;
+  }
+  console.log(`sell amount (Lamports): ${sellAmountLamports}`);
+  const sellAmountLamportsNum = sellAmountLamports instanceof BN ? sellAmountLamports.toNumber() : sellAmountLamports;
+  const sellDisplay = sellAmountLamportsNum / BASE_TOKEN_LAMPORTS_AMOUNT;
+  const profitPercent = ((sellAmountLamportsNum - BASE_TOKEN_LAMPORTS_AMOUNT) / BASE_TOKEN_LAMPORTS_AMOUNT) * 100;
+
+  console.log(`Spent: ${lamportsReceived} Lamports, Received: ${sellAmountLamports} Lamports, Profit: ${profitPercent.toFixed(2)}%`);
+  console.log(`${token.symbol} → ${BASE_TOKEN_SYMBOL} (${source}): ${sellAmountLamports} Lamports (≈ ${sellDisplay} ${BASE_TOKEN_SYMBOL})`);
+
+  // Без змін у логіці збереження
+  results.push({
+    pair: `${BASE_TOKEN_SYMBOL} / ${token.symbol}`,
+    buyAmount_lamports: lamportsReceived.toString(),
+    tokenAmount_display: tokenDisplay.toString(),
+    sellAmount_lamports: sellAmountLamports.toString(),
+    sellAmount_display: sellDisplay.toString(),
+    profitPercent: profitPercent.toFixed(2),
+    source, // ✅ динамічно додаємо назву моделі
+  });
+
+}
+// === 2️⃣ Функція для напрямку Meteora → Jupiter ===
+async function scanReverse(
+  token: Token,
+  TOKEN_LAMPORTS: number,
+  pairAddress: string,
+  getMeteoraQuoteFn: (pairAddress: string, amountLamports: number) => Promise<BN | null | undefined>,
+  source: string,
+  results: ScanResult[]
+) {
+  console.log(`\n🔁 Checking ${source} → Jupiter for ${token.symbol}`);
+
+
+  const meteoraBuy = await getMeteoraQuoteFn(pairAddress, BASE_TOKEN_LAMPORTS_AMOUNT);
+
+  console.log(`Pair: ${pairAddress}, amount: ${BASE_TOKEN_LAMPORTS_AMOUNT}`);
+  console.log(`Meteora quote result:`, meteoraBuy);
+  
+  if (!meteoraBuy) {
+    console.log(`Reverse buy not available for ${token.symbol}`);
+    return;
+  }
+
+  const tokenAmountFromMeteora = meteoraBuy instanceof BN ? meteoraBuy.toNumber() : Number(meteoraBuy);
+
+  // Продаємо токен на Jupiter
+  const jupiterSell = await getJupiterQuote(token.mint, BASE_TOKEN_MINT, tokenAmountFromMeteora);
+  if (!jupiterSell) {
+    console.log(`Reverse sell not available for ${token.symbol}`);
+    return;
+  }
+  const sellAmountReverse = Number(jupiterSell.outAmount);
+  const sellDisplayReverse = sellAmountReverse / BASE_TOKEN_LAMPORTS_AMOUNT;
+  const profitPercentReverse = ((sellAmountReverse - BASE_TOKEN_LAMPORTS_AMOUNT) / BASE_TOKEN_LAMPORTS_AMOUNT) * 100;
+
+  results.push({
+    pair: `${BASE_TOKEN_SYMBOL} / ${token.symbol}`,
+    buyAmount_lamports: BASE_TOKEN_LAMPORTS_AMOUNT.toString(),
+    tokenAmount_display: (tokenAmountFromMeteora / TOKEN_LAMPORTS).toFixed(6),
+    sellAmount_lamports: sellAmountReverse.toString(),
+    sellAmount_display: sellDisplayReverse.toFixed(6),
+    profitPercent: profitPercentReverse.toFixed(2),
+    source: `${source} (Meteora→Jupiter)`
+  });
 }

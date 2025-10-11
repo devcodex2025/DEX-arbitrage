@@ -37,28 +37,30 @@ interface ScanResult {
 const BASE_AMOUNT_LAMPORTS = BASE_AMOUNT * BASE_TOKEN_LAMPORTS_AMOUNT;
 
 // 1️⃣ Отримуємо токени для DAMMV2
-// const filteredDAMMV2 = await getCommonTokenPairs(getMeteoraPairsDAMMV2, "MeteoraDAMMV2");
+ const filteredDAMMV2 = await getCommonTokenPairs(getMeteoraPairsDAMMV2, "MeteoraDAMMV2");
 
 // 2️⃣ Отримуємо токени для DLMM
-const filteredDLMM = await getCommonTokenPairs(getMeteoraPairsDLMM, "MeteoraDLMM");
+//const filteredDLMM = await getCommonTokenPairs(getMeteoraPairsDLMM, "MeteoraDLMM");
 
 
 const results: ScanResult[] = []; // Глобальний масив для всіх моделей
-// 🔹 Скануємо DAMMV2
-// await scanTokenPairs({
-//   tokens: filteredDAMMV2,
-//   getMeteoraQuoteFn: getMeteoraQuoteDAMMV2,
-//   source: "MeteoraDAMMV2",
-//   results
-// });
+//🔹 Скануємо DAMMV2
+await scanTokenPairs({
+  tokens: filteredDAMMV2,
+  getMeteoraQuoteFn: getMeteoraQuoteDAMMV2,
+  source: "MeteoraDAMMV2",
+  results,
+  checkForward: false,
+  checkReverse: true // новий прапорець
+});
 
 // 🔹 Скануємо DLMM
-await scanTokenPairs({
-  tokens: filteredDLMM,
-  getMeteoraQuoteFn: getMeteoraQuoteDLMM,
-  source: "MeteoraDLMM",
-  results
-});
+// await scanTokenPairs({
+//   tokens: filteredDLMM,
+//   getMeteoraQuoteFn: getMeteoraQuoteDLMM,
+//   source: "MeteoraDLMM",
+//   results
+// });
 
 // 🔹 Після всіх сканувань — зберігаємо результати
 saveResultsToExcel(results, RESULTS_FOLDER);

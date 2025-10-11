@@ -6,6 +6,8 @@ This scanner compare prices on 2 DEXes - Jupiter and Meteora. Automatically crea
 
 To start using application you need to fill .env configuration file with constants, what present in .env.example
 
+Install depencies with ```npm i``` command and if you not have tsx, you also need to install tsx to run typescript file
+
 To launch scanner you need to have tokens list. I prepare for it command. To make it automatically.
 
 To run token creation you need to use command - ```npx tsx ./utils/generateTokens.ts```

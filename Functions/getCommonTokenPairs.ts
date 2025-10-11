@@ -1,4 +1,4 @@
-import { BASE_TOKEN_MINT } from "../Config/config";
+import { BASE_TOKEN_MINT, LIQUIDITY_USD } from "../Config/config";
 import { TOKENS_FILE } from "../Config/config";
 import fs from "fs";
 
@@ -31,9 +31,9 @@ export default async function getCommonTokenPairs(
     console.log("⚠️ No Meteora pairs found — scanning all tokens instead...");
     return allTokens.map(t => ({ ...t, meteoraPairAddress: null }));
   }
-
+ 
   const filtered = allTokens
-    .filter(t => meteoraPairs[t.mint])
+    .filter(t => meteoraPairs[t.mint] && meteoraPairs[t.mint].liquidity > LIQUIDITY_USD) //)
     .map(t => ({
       ...t,
       meteoraPairAddress: meteoraPairs[t.mint].address,

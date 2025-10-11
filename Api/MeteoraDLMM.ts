@@ -1,6 +1,6 @@
 import fs from "fs";
 import fetch from "node-fetch";
-import { TOKENS_FILE, RPC_ENDPOINT, SLIPPAGE_BPS, BASE_TOKEN_MINT } from "../Config/config.js"
+import { TOKENS_FILE, RPC_ENDPOINT, SLIPPAGE_BPS, BASE_TOKEN_MINT, MAX_TOKEN_PAGES_SCAN } from "../Config/config.js"
 import DLMM from '@meteora-ag/dlmm'
 import { Connection, PublicKey } from '@solana/web3.js';
 import BN from "bn.js";
@@ -25,7 +25,7 @@ export async function getMeteoraPairsDLMM(baseMint: string) {
         const tokenToPair: Record<string, MeteoraPairInfo> = {};
 
         const limit = 100;
-        const MAX_PAGES = 500; // безпечний максимум
+        const MAX_PAGES = MAX_TOKEN_PAGES_SCAN; // безпечний максимум
         const concurrency = 5; // скільки сторінок запитуємо одночасно
         let page = 0;
         let keepFetching = true;

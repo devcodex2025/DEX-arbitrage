@@ -14,3 +14,5 @@ export const RESULTS_FOLDER: string = "./data/results";
 export const BASE_TOKEN_DECIMALS: number = parseInt(process.env.BASE_TOKEN_DECIMALS ?? "9");
 export const BASE_TOKEN_LAMPORTS_AMOUNT: number = 10 ** BASE_TOKEN_DECIMALS;
 export const RPC_ENDPOINT: string | undefined = process.env.RPC_ENDPOINT;
+export const MAX_TOKEN_PAGES_SCAN: number = parseInt(process.env.MAX_TOKEN_PAGES_SCAN ?? "500");
+export const LIQUIDITY_USD: number = parseInt(process.env.LIQUIDITY_USD ?? "1000");

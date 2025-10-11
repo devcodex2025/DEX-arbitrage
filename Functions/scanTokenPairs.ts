@@ -112,7 +112,7 @@ async function scanForward(
     sellAmount_lamports: sellAmountLamports.toString(),
     sellAmount_display: sellDisplay.toString(),
     profitPercent: profitPercent.toFixed(2),
-    source, // ✅ динамічно додаємо назву моделі
+    source: `${source} (Jupiter → Meteora)`, // ✅ динамічно додаємо назву моделі
   });
 
 }
@@ -160,6 +160,6 @@ async function scanReverse(
     sellAmount_lamports: sellAmountReverse.toString(),
     sellAmount_display: sellDisplayReverse.toFixed(6),
     profitPercent: profitPercentReverse.toFixed(2),
-    source: `${source} (Meteora→Jupiter)`
+    source: `${source} (Meteora → Jupiter)`
   });
 }

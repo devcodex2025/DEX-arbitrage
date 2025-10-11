@@ -111,13 +111,24 @@ export async function getMeteoraQuoteDLMM(
         const allowedSlippage = new BN(50); // 0.5% = 50 bps
         const binArrays = await dLMMPool.getBinArrays(); // масив BinArrayAccount з пулу
 
+        // let totalLiquidity = new BN(0);
+        // for (const bin of binArrays[0].account.bins) { // для простоти беремо перший binArray
+        //     const available = swapForY ? bin.amountX : bin.amountY;
+        //     totalLiquidity = totalLiquidity.add(available);
+        // }
+
+        // if (totalLiquidity.lt(inAmount)) {
+        //     console.log("⚠️ Not enough liquidity in bins for requested amount.");
+        //     return null;
+        // }
+
         const quote = dLMMPool.swapQuote(
             inAmount,
             swapForY,
             allowedSlippage,
             binArrays,
-            false, // isPartialFill
-            0      // maxExtraBinArrays
+            true, // isPartialFill
+            3      // maxExtraBinArrays
         );
         // отримуємо кількість Lamports після свапу
         console.log(`quote:`, quote);

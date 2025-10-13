@@ -9,7 +9,7 @@ To start using application you need to fill .env configuration file with constan
 Install depencies with ```npm i``` command and if you not have tsx, you also need to install tsx to run typescript file
 
 To launch scanner you need to have tokens list. I prepare for it command. To make it automatically.
-To run token creation you need to use command - ```npx tsx ./utils/generateTokens.ts top``` to get top 100 most tradable tokens or ```npx tsx ./utils/generateTokens.ts top``` to get all tokens
+To run token creation you need to use command - ```npx tsx ./utils/generateTokens.ts top``` to get top 100 most tradable tokens or ```npx tsx ./utils/generateTokens.ts all``` to get all tokens
 
 Once you create, you can start scanning.
 Command to start scanning - ```npx tsx ./arbScanner.ts```

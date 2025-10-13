@@ -86,7 +86,7 @@ export async function getMeteoraQuoteDAMMV2(
 ): Promise<BN | null> {
   const tokenAmountInPool = await getTokenAmountInPool(poolAddress, isReverse);
   if (lamportAmount < tokenAmountInPool) {
-    console.log('❌ Swap amount is less than token B amount in pool. Aborting to avoid high price impact.');
+    console.log('❌ Swap amount is less than token amount in pool. Aborting to avoid high price impact.');
   }
   const connection = new Connection(RPC_ENDPOINT, 'confirmed');
   const cpAmm = new CpAmm(connection);
@@ -103,7 +103,6 @@ export async function getMeteoraQuoteDAMMV2(
       tokenAMintPbkey = poolState.tokenBMint;
       tokenBMintPbkey = poolState.tokenAMint;
     }
-
     // отримуємо інформацію про токени
     const inputMintInfo = await getMint(connection, tokenAMintPbkey);
     const outputMintInfo = await getMint(connection, tokenBMintPbkey);
@@ -140,6 +139,8 @@ export async function getMeteoraQuoteDAMMV2(
   }
 }
 
+import { toLamports } from '../src/core/lamportsConverter';
+
 export async function getTokenAmountInPool(poolAddress: string, isReverse: boolean): Promise<number> {
   const url = `https://dammv2-api.meteora.ag/pools/${poolAddress}`;
   const response = await fetch(url, {
@@ -148,5 +149,8 @@ export async function getTokenAmountInPool(poolAddress: string, isReverse: boole
   });
   if (!response.ok) throw new Error('Network response was not ok: ' + response.statusText);
   const data = await response.json();
-  return isReverse ? data.data.token_a_amount : data.data.token_b_amount;
+  // Витягуємо mint і amount
+  const mint = isReverse ? data.data.token_a_mint : data.data.token_b_mint;
+  const amount = isReverse ? data.data.token_a_amount : data.data.token_b_amount;
+  return toLamports(amount, mint);
 }

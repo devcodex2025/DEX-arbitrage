@@ -100,7 +100,7 @@ export async function getMeteoraQuoteDLMM(
 
     const poolAdressPubkey = new PublicKey(poolAddress);
 
-    const connection = new Connection("https://api.mainnet-beta.solana.com");
+    const connection = new Connection(RPC_ENDPOINT, 'confirmed');
     const dLMMPool = await DLMM.create(connection, poolAdressPubkey);
     // console.log('DLMM Pool Info:', dLMM);
     //return null; // тимчасово, поки не налагоджено
@@ -137,4 +137,8 @@ export async function getMeteoraQuoteDLMM(
         console.error('❌ Unexpected error in getMeteoraQuote:', err instanceof Error ? err.message : err);
         return null;
     }
+}
+
+checkSwapAmount(pairAddress, mintA, mintB){
+
 }

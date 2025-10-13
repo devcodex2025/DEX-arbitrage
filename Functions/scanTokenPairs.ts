@@ -8,6 +8,7 @@ interface Token {
   symbol: string;
   decimals: number;
   meteoraPairAddress?: string | null;
+  meteora_fee?: number; // комісія Meteora
 }
 
 interface ScanResult {
@@ -18,6 +19,7 @@ interface ScanResult {
   sellAmount_display: string;
   profitPercent: string;
   source: string;
+  meteora_fee?: number; // комісія Meteora у %
 }
 
 // === 🕒 Унікальний файл для кожного запуску ===
@@ -76,11 +78,11 @@ export default async function scanTokenPairs({
             await scanReverse(token, TOKEN_LAMPORTS, pairAddress, getMeteoraQuoteFn, source, results);
           }
         } catch (err: any) {
-          console.error(`Error scanning ${token.symbol}:`, err.message);
+          console.error(`Error scanning ${token?.symbol ?? 'unknown'}:`, err.message);
         }
       }
     } catch (err: any) {
-      console.error(`Error scanning ${token.symbol}:`, err.message);
+      console.error(`Error scanning token loop:`, err.message);
     }
   }
 }
@@ -103,9 +105,9 @@ async function scanForward(
   }
   const lamportsReceived = Number(jupiterQuote.outAmount);
   //const lamportsReceived = Number(jupiterQuote.outAmount);
-  const tokenDisplay = lamportsReceived / TOKEN_LAMPORTS;
+  const lamportsReceivedDisplay = lamportsReceived / TOKEN_LAMPORTS;
 
-  console.log(`${BASE_TOKEN_SYMBOL} → ${token.symbol} (Jupiter): ${lamportsReceived} Lamports (≈ ${tokenDisplay} ${token.symbol})`);
+  console.log(`${BASE_TOKEN_SYMBOL} → ${token.symbol} (Jupiter): ${lamportsReceived} Lamports (≈ ${lamportsReceivedDisplay} ${token.symbol})`);
 
   await new Promise(r => setTimeout(r, DELAY_MS));
 
@@ -127,14 +129,18 @@ async function scanForward(
 
   console.log(`Spent: ${lamportsReceived} Lamports, Received: ${sellAmountLamports} Lamports, Profit: ${profitPercent.toFixed(2)}%`);
   console.log(`${token.symbol} → ${BASE_TOKEN_SYMBOL} (${source}): ${sellAmountLamports} Lamports (≈ ${sellDisplay} ${BASE_TOKEN_SYMBOL})`);
-
-  if (profitPercent <= 0) return;
+  await new Promise(r => setTimeout(r, DELAY_MS));
+  // ✅ Виконуємо тільки якщо прибуток >= 2%
+  if (profitPercent < 2) {
+    console.log(`Profit < 2%, skipping ${token.symbol}`);
+    return;
+  }
 
   // Без змін у логіці збереження
   results.push({
     pair: `${BASE_TOKEN_SYMBOL} / ${token.symbol}`,
     buyAmount_lamports: lamportsReceived.toString(),
-    tokenAmount_display: tokenDisplay.toString(),
+    tokenAmount_display: lamportsReceivedDisplay.toString(),
     sellAmount_lamports: sellAmountLamports.toString(),
     sellAmount_display: sellDisplay.toString(),
     profitPercent: profitPercent.toFixed(2),
@@ -154,11 +160,7 @@ async function scanReverse(
   source: string,
   results: ScanResult[]
 ) {
-  // Функція затримки
-  function sleep(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-  await sleep(1200);
+  await new Promise(r => setTimeout(r, DELAY_MS));
   // 1️⃣ Купуємо токен на Meteora
   const meteoraBuy = await getMeteoraQuoteFn(pairAddress, BASE_AMOUNT_IN_LAMPORTS, true);
   if (!meteoraBuy) {
@@ -191,6 +193,7 @@ async function scanReverse(
     sellAmount_lamports: sellAmountReverse.toString(),
     sellAmount_display: sellDisplayReverse.toFixed(6),
     profitPercent: profitPercentReverse.toFixed(2),
+    meteora_fee: token.meteora_fee ?? 0, // комісія Meteora у %
     source: `${source} (Meteora → Jupiter)`
   });
 

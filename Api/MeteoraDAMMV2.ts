@@ -5,10 +5,12 @@ import { CpAmm } from "@meteora-ag/cp-amm-sdk";
 import { Connection, PublicKey } from '@solana/web3.js';
 import BN from "bn.js";
 import { getMint } from "@solana/spl-token";
+import { get } from "http";
 
 interface MeteoraPairInfo {
   address: string;
   liquidity: number; // ліквідність базового токена у Lamports
+  meteora_fee?: number; // комісія Meteora у %
 }
 
 export async function getMeteoraPairsDAMMV2(baseMint: string) {
@@ -17,6 +19,7 @@ export async function getMeteoraPairsDAMMV2(baseMint: string) {
     symbol: string;
     decimals: number;
     meteoraPairAddress?: string | null;
+    meteora_fee?: number; // комісія Meteora
   }
 
   try {
@@ -50,7 +53,8 @@ export async function getMeteoraPairsDAMMV2(baseMint: string) {
           if (pair.token_b_mint === baseMint && knownMints.has(pair.token_a_mint)) {
             tokenToPair[pair.token_a_mint] = {
               address: pair.pool_address,
-              liquidity: pair.liquidity // ліквідність базового токена у Lamports
+              liquidity: pair.liquidity, // ліквідність базового токена у Lamports
+              meteora_fee: pair.base_fee // комісія Meteora у %
             };
           }
         }
@@ -80,9 +84,11 @@ export async function getMeteoraQuoteDAMMV2(
   lamportAmount: number,
   isReverse = false
 ): Promise<BN | null> {
-
-
-  const connection = new Connection("https://api.mainnet-beta.solana.com");
+  const tokenAmountInPool = await getTokenAmountInPool(poolAddress, isReverse);
+  if (lamportAmount < tokenAmountInPool) {
+    console.log('❌ Swap amount is less than token B amount in pool. Aborting to avoid high price impact.');
+  }
+  const connection = new Connection(RPC_ENDPOINT, 'confirmed');
   const cpAmm = new CpAmm(connection);
 
   try {
@@ -132,4 +138,15 @@ export async function getMeteoraQuoteDAMMV2(
     console.error('❌ Unexpected error in getMeteoraQuote:', err instanceof Error ? err.message : err);
     return null;
   }
+}
+
+export async function getTokenAmountInPool(poolAddress: string, isReverse: boolean): Promise<number> {
+  const url = `https://dammv2-api.meteora.ag/pools/${poolAddress}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!response.ok) throw new Error('Network response was not ok: ' + response.statusText);
+  const data = await response.json();
+  return isReverse ? data.data.token_a_amount : data.data.token_b_amount;
 }

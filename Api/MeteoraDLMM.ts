@@ -138,7 +138,3 @@ export async function getMeteoraQuoteDLMM(
         return null;
     }
 }
-
-checkSwapAmount(pairAddress, mintA, mintB){
-
-}

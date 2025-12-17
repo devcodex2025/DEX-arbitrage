@@ -17,3 +17,11 @@ export const RPC_ENDPOINT: string = process.env.RPC_ENDPOINT ?? "https://api.mai
 export const MAX_TOKEN_PAGES_SCAN: number = parseInt(process.env.MAX_TOKEN_PAGES_SCAN ?? "500");
 export const LIQUIDITY_USD: number = parseInt(process.env.LIQUIDITY_USD ?? "1000");
 export const BASE_AMOUNT_IN_LAMPORTS: number = (10 ** BASE_TOKEN_DECIMALS) * BASE_AMOUNT;
+
+// Trading bot configuration
+export const PRIVATE_KEY: string | undefined = process.env.PRIVATE_KEY;
+export const DRY_RUN: boolean = process.env.DRY_RUN !== "false"; // Default to true for safety
+export const MIN_PROFIT_PERCENT: number = Number(process.env.MIN_PROFIT_PERCENT ?? 2);
+export const ESTIMATED_FEES: number = Number(process.env.ESTIMATED_FEES ?? 1.5);
+export const MAX_CONCURRENT_SCANS: number = Number(process.env.MAX_CONCURRENT_SCANS ?? 3);
+export const PRICE_CACHE_MS: number = Number(process.env.PRICE_CACHE_MS ?? 2000);

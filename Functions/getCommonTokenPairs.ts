@@ -33,12 +33,18 @@ export default async function getCommonTokenPairs(
   }
  
   const filtered = allTokens
-    .filter(t => meteoraPairs[t.mint] && meteoraPairs[t.mint].liquidity > LIQUIDITY_USD) //)
+    .filter(t => {
+      const pair = meteoraPairs[t.mint];
+      // Просто перевіряємо наявність пари (ліквідність від API некоректна)
+      return pair !== undefined;
+    })
     .map(t => ({
       ...t,
       meteoraPairAddress: meteoraPairs[t.mint].address,
-    }));
+    }))
+    .slice(0, 20); // Обмежуємо до 20 токенів для балансу між швидкістю та rate limits
 
-  console.log(`✅ Found ${filtered.length} common & liquid tokens on Jupiter & ${source}.`);
+  console.log(`✅ Found ${Object.keys(meteoraPairs).length} tokens with pairs on Meteora.`);
+  console.log(`✅ Found ${filtered.length} tokens to scan on Jupiter & ${source}.`);
   return filtered;
 }

@@ -18,17 +18,29 @@ export async function getTokenInfoFromJupiter() {
 
 export async function getJupiterQuote(inMint, outMint, amount) {
     try {
-        const url = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${inMint}&outputMint=${outMint}&amount=${amount}&slippageBps=${SLIPPAGE_BPS}`;
-        const res = await fetch(url, {
-            headers: {
-                "Content-Type": "application/json",
-                "x-api-key": JUP_API_KEY
-            },
-        });
+        const url = `https://api.jup.ag/swap/v1/quote?inputMint=${inMint}&outputMint=${outMint}&amount=${amount}&slippageBps=${SLIPPAGE_BPS}`;
+        
+        const headers = {
+            "Content-Type": "application/json"
+        };
+        
+        // Додаємо API ключ якщо він є
+        if (JUP_API_KEY) {
+            headers["x-api-key"] = JUP_API_KEY;
+        }
+        
+        const res = await fetch(url, { headers });
+        
+        if (!res.ok) {
+            const errorText = await res.text();
+            console.error(`Jupiter API error ${res.status}: ${errorText.substring(0, 100)}`);
+            throw new Error(`Jupiter API error: ${res.status} ${res.statusText}`);
+        }
+        
         const data = await res.json();
         return { raw: data, outAmount: data.outAmount ? new Decimal(data.outAmount) : null };
     } catch (err) {
-        console.error(err.message);
+        console.error("Jupiter quote error:", err.message);
         return { raw: { error: err.message }, outAmount: null };
     }
 }

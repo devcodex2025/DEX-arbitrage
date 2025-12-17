@@ -84,16 +84,24 @@ export async function getMeteoraQuoteDAMMV2(
   lamportAmount: number,
   isReverse = false
 ): Promise<BN | null> {
-  const tokenAmountInPool = await getTokenAmountInPool(poolAddress, isReverse);
-  if (lamportAmount < tokenAmountInPool) {
-    console.log('❌ Swap amount is less than token amount in pool. Aborting to avoid high price impact.');
-  }
   const connection = new Connection(RPC_ENDPOINT, 'confirmed');
   const cpAmm = new CpAmm(connection);
 
   try {
     const AddressPool = new PublicKey(poolAddress);
     const poolState = await cpAmm.fetchPoolState(AddressPool);
+    
+    // Перевірка валідності пулу
+    if (!poolState || !poolState.tokenAMint || !poolState.tokenBMint) {
+      return null;
+    }
+    
+    // Перевірка що пул має ліквідність
+    if (!poolState.tokenAAmount || !poolState.tokenBAmount || 
+        poolState.tokenAAmount.isZero() || poolState.tokenBAmount.isZero()) {
+      return null;
+    }
+    
     const currentSlot = await connection.getSlot();
     const blockTime = await connection.getBlockTime(currentSlot) ?? Math.floor(Date.now() / 1000);
     let tokenAMintPbkey = poolState.tokenAMint;
@@ -139,18 +147,4 @@ export async function getMeteoraQuoteDAMMV2(
   }
 }
 
-import { toLamports } from '../src/core/lamportsConverter';
-
-export async function getTokenAmountInPool(poolAddress: string, isReverse: boolean): Promise<number> {
-  const url = `https://dammv2-api.meteora.ag/pools/${poolAddress}`;
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!response.ok) throw new Error('Network response was not ok: ' + response.statusText);
-  const data = await response.json();
-  // Витягуємо mint і amount
-  const mint = isReverse ? data.data.token_a_mint : data.data.token_b_mint;
-  const amount = isReverse ? data.data.token_a_amount : data.data.token_b_amount;
-  return toLamports(amount, mint);
-}
+// Функція видалена - перевірка ліквідності відбувається через SDK

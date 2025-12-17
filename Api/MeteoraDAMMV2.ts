@@ -81,7 +81,7 @@ interface QuoteResult {
 
 export async function getMeteoraQuoteDAMMV2(
   poolAddress: string,
-  lamportAmount: number,
+  tokenRawAmount: number,
   isReverse = false
 ): Promise<BN | null> {
   const connection = new Connection(RPC_ENDPOINT, 'confirmed');
@@ -96,12 +96,6 @@ export async function getMeteoraQuoteDAMMV2(
       return null;
     }
     
-    // Перевірка що пул має ліквідність
-    if (!poolState.tokenAAmount || !poolState.tokenBAmount || 
-        poolState.tokenAAmount.isZero() || poolState.tokenBAmount.isZero()) {
-      return null;
-    }
-    
     const currentSlot = await connection.getSlot();
     const blockTime = await connection.getBlockTime(currentSlot) ?? Math.floor(Date.now() / 1000);
     let tokenAMintPbkey = poolState.tokenAMint;
@@ -111,38 +105,45 @@ export async function getMeteoraQuoteDAMMV2(
       tokenAMintPbkey = poolState.tokenBMint;
       tokenBMintPbkey = poolState.tokenAMint;
     }
+    
     // отримуємо інформацію про токени
     const inputMintInfo = await getMint(connection, tokenAMintPbkey);
     const outputMintInfo = await getMint(connection, tokenBMintPbkey);
     const tokenADecimal = inputMintInfo.decimals;
     const tokenBDecimal = outputMintInfo.decimals;
 
-
     // поточний епох
     const epochInfo = await connection.getEpochInfo();
     const currentEpochNumber = epochInfo.epoch;
 
-    const quote = cpAmm.getQuote({
-      inAmount: new BN(lamportAmount),
-      inputTokenMint: tokenAMintPbkey,
-      slippage: 0.5, // 0.5% slippage
-      poolState,
-      currentTime: blockTime,
-      currentSlot,
-      inputTokenInfo: {
-        mint: inputMintInfo,      // об'єкт типу Mint (отриманий через getMint)
-        currentEpoch: currentEpochNumber, // number
-      },
-      outputTokenInfo: {
-        mint: outputMintInfo,     // також об'єкт типу Mint
-        currentEpoch: currentEpochNumber, // number
-      },
-      tokenADecimal,
-      tokenBDecimal,
-    });
-    return quote.swapOutAmount;
+    // Спроба отримати quote з обробкою помилки "Assertion failed"
+    try {
+      const quote = cpAmm.getQuote({
+        inAmount: new BN(tokenRawAmount),
+        inputTokenMint: tokenAMintPbkey,
+        slippage: 0.5, // 0.5% slippage
+        poolState,
+        currentTime: blockTime,
+        currentSlot,
+        inputTokenInfo: {
+          mint: inputMintInfo,      // об'єкт типу Mint (отриманий через getMint)
+          currentEpoch: currentEpochNumber, // number
+        },
+        outputTokenInfo: {
+          mint: outputMintInfo,     // також об'єкт типу Mint
+          currentEpoch: currentEpochNumber, // number
+        },
+        tokenADecimal,
+        tokenBDecimal,
+      });
+      return quote.swapOutAmount;
+    } catch (quoteErr) {
+      // Тихо ігноруємо помилки getQuote (наприклад, "Assertion failed" для пулів з нульовою ліквідністю)
+      return null;
+    }
   } catch (err: unknown) {
-    console.error('❌ Unexpected error in getMeteoraQuote:', err instanceof Error ? err.message : err);
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error(`❌ Meteora error for ${poolAddress}: ${errorMsg}`);
     return null;
   }
 }

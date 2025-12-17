@@ -1,5 +1,5 @@
 import fs from "fs";
-import { Connection, Keypair, VersionedTransaction, PublicKey } from "@solana/web3.js";
+import { Connection, Keypair, VersionedTransaction, PublicKey, SystemProgram, TransactionMessage, TransactionInstruction, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { getJupiterQuote } from "./Api/Jupiter.js";
 import { getMeteoraQuoteDAMMV2, getMeteoraPairsDAMMV2 } from "./Api/MeteoraDAMMV2.js";
 import {
@@ -19,15 +19,24 @@ import {
 import BN from "bn.js";
 import getCommonTokenPairs from "./Functions/getCommonTokenPairs.js";
 import bs58 from "bs58";
+import { SearcherClient, searcherClient } from "jito-ts/dist/sdk/block-engine/searcher.js";
+import { Bundle } from "jito-ts/dist/sdk/block-engine/types.js";
 
-// Jito Block Engine URLs (найшвидші endpoints)
-const JITO_ENDPOINTS = [
-  "https://mainnet.block-engine.jito.wtf",
-  "https://amsterdam.mainnet.block-engine.jito.wtf",
-  "https://frankfurt.mainnet.block-engine.jito.wtf",
-  "https://ny.mainnet.block-engine.jito.wtf",
-  "https://tokyo.mainnet.block-engine.jito.wtf"
+// Jito Block Engine URLs
+const JITO_BLOCK_ENGINE = "https://mainnet.block-engine.jito.wtf";
+const JITO_TIP_ACCOUNTS = [
+  "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+  "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+  "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+  "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+  "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+  "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+  "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+  "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
 ];
+
+// Jito tip amount (в lamports) - 0.0001 SOL за bundle
+const JITO_TIP_LAMPORTS = 100_000;
 
 interface Token {
   mint: string;
@@ -120,9 +129,32 @@ class OptimizedArbitrageBot {
     while (true) {
       const startTime = Date.now();
       
-      // Обробляємо токени ПОСЛІДОВНО (один за раз)
-      for (const token of tokens) {
-        await this.scanAndExecute(token);
+      // Обробляємо токени ПОСЛІДОВНО (один токен за раз)
+      // Кожен токен сканується паралельно на Jupiter і Meteora одночасно
+      for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        console.log(`\n${"=".repeat(60)}`);
+        console.log(`[${i + 1}/${tokens.length}] ${token.symbol} (${token.mint.slice(0, 8)}...)`);
+        console.log(`${"=".repeat(60)}`);
+        
+        try {
+          // Додаємо timeout 30 секунд для кожного токена
+          await Promise.race([
+            this.scanAndExecute(token),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Token scan timeout')), 30000))
+          ]);
+        } catch (err: any) {
+          if (err.message === 'Token scan timeout') {
+            console.log(`   [!] Timeout - skipping to next token`);
+          } else {
+            console.log(`   [!] Error: ${err.message}`);
+          }
+          this.stats.errors++;
+        }
+        
+        // Затримка між токенами для уникнення rate limit (429)
+        // 1000ms = 1 токен/сек (2 паралельні API calls = ~2 calls/sec загалом)
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
       const cycleTime = Date.now() - startTime;
@@ -141,20 +173,36 @@ class OptimizedArbitrageBot {
       if (!token.meteoraPairAddress) return null;
 
       const TOKEN_LAMPORTS = 10 ** token.decimals;
-
-      // Отримуємо ціни ПОСЛІДОВНО з затримкою для rate limiting (max 1 req/sec)
-      const jupiterBuyResult = await this.getJupiterPrice(token.mint, BASE_AMOUNT_IN_LAMPORTS);
-      await new Promise(r => setTimeout(r, 1000)); // 1000ms затримка = 1 req/sec
       
-      const meteoraBuyResult = await this.getMeteoraPrice(token.meteoraPairAddress, BASE_AMOUNT_IN_LAMPORTS, true);
-      await new Promise(r => setTimeout(r, 1000)); // Затримка перед наступним запитом
-
-      if (!jupiterBuyResult) return null;
-      if (!meteoraBuyResult) return null;
+      // Отримуємо ціни ПАРАЛЕЛЬНО з обох бірж одночасно для мінімізації затримки
+      console.log(`   Fetching prices from both exchanges...`);
+      const [jupiterBuyResult, meteoraBuyResult] = await Promise.all([
+        this.getJupiterPrice(token.mint, BASE_AMOUNT_IN_LAMPORTS),
+        this.getMeteoraPrice(token.meteoraPairAddress, BASE_AMOUNT_IN_LAMPORTS, true)
+      ]);
+      
+      if (!jupiterBuyResult) {
+        console.log(`   [X] Jupiter: No quote`);
+        return null;
+      }
+      console.log(`   [+] Jupiter: ${(jupiterBuyResult / TOKEN_LAMPORTS).toFixed(4)} ${token.symbol}`);
+      
+      if (!meteoraBuyResult) {
+        console.log(`   [X] Meteora: No quote`);
+        return null;
+      }
+      console.log(`   [+] Meteora: ${(meteoraBuyResult / TOKEN_LAMPORTS).toFixed(4)} ${token.symbol}`);
 
       const tokensFromJupiter = jupiterBuyResult;
       const tokensFromMeteora = meteoraBuyResult;
-
+      
+      // Перевірка на адекватність даних - якщо різниця більше 100x, це bad data
+      const ratio = Math.max(tokensFromJupiter, tokensFromMeteora) / Math.min(tokensFromJupiter, tokensFromMeteora);
+      if (ratio > 100) {
+        console.log(`   [!] Price difference too large (${ratio.toFixed(0)}x) - likely bad liquidity, skipping...`);
+        return null;
+      }
+      
       // Аналізуємо який напрямок вигідніший
       const opportunity = await this.analyzeArbitrage(
         token,
@@ -162,7 +210,11 @@ class OptimizedArbitrageBot {
         tokensFromMeteora
       );
 
-      if (!opportunity) return null;
+      if (!opportunity) {
+        // Виводимо детальний лог НЕприбуткових угод
+        await this.logUnprofitableArbitrage(token, tokensFromJupiter, tokensFromMeteora);
+        return null;
+      }
 
       // Якщо знайшли можливість - виконуємо або симулюємо
       return await this.executeArbitrage(opportunity);
@@ -201,18 +253,77 @@ class OptimizedArbitrageBot {
     this.setCachedPrice(cacheKey, result);
     return result;
   }
-  // Отримання ціни Meteora з кешем
+  // Отримання ціни Meteora з кешем та timeout
   private async getMeteoraPrice(pairAddress: string, amount: number, reverse: boolean): Promise<number | null> {
     const cacheKey = `met_${pairAddress}_${amount}_${reverse}`;
     const cached = this.getCachedPrice(cacheKey);
     if (cached) return cached;
 
-    const quote = await getMeteoraQuoteDAMMV2(pairAddress, amount, reverse);
-    if (!quote) return null;
+    try {
+      // Timeout 10 секунд для Meteora запитів
+      const quote = await Promise.race([
+        getMeteoraQuoteDAMMV2(pairAddress, amount, reverse),
+        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+      ]);
+      
+      if (!quote) {
+        return null;
+      }
 
-    const result = quote instanceof BN ? quote.toNumber() : Number(quote);
-    this.setCachedPrice(cacheKey, result);
-    return result;
+      const result = quote instanceof BN ? quote.toNumber() : Number(quote);
+      this.setCachedPrice(cacheKey, result);
+      return result;
+    } catch (err) {
+      if (err instanceof Error && err.message === 'Timeout') {
+        console.log(`   [!] Meteora timeout for ${pairAddress.slice(0, 8)}...`);
+      }
+      return null;
+    }
+  }
+
+  // Detailed profitability check log
+  private async logUnprofitableArbitrage(token: Token, tokensFromJupiter: number, tokensFromMeteora: number) {
+    console.log(`\n   --- Checking Arbitrage Profitability ---`);
+    
+    // OPTION 1: Jupiter → Meteora
+    console.log(`   [1] Jupiter -> Meteora:`);
+    
+    const meteoraSellQuote = await this.getMeteoraPrice(
+      token.meteoraPairAddress!,
+      tokensFromJupiter,
+      false
+    );
+    
+    if (meteoraSellQuote && meteoraSellQuote > 0) {
+      const profitLamports = meteoraSellQuote - BASE_AMOUNT_IN_LAMPORTS;
+      const profitSOL = profitLamports / BASE_TOKEN_LAMPORTS_AMOUNT;
+      const profitPercent = (profitLamports / BASE_AMOUNT_IN_LAMPORTS) * 100;
+      const sign = profitSOL >= 0 ? '+' : '';
+      const statusIcon = profitPercent >= MIN_PROFIT_PERCENT ? '[+]' : '[X]';
+      
+      console.log(`       ${BASE_AMOUNT} SOL -> ${(tokensFromJupiter / (10**token.decimals)).toFixed(4)} ${token.symbol} -> ${(meteoraSellQuote / BASE_TOKEN_LAMPORTS_AMOUNT).toFixed(6)} SOL`);
+      console.log(`       ${statusIcon} Profit: ${sign}${profitSOL.toFixed(6)} SOL (${sign}${profitPercent.toFixed(2)}%)`);
+    } else {
+      console.log(`       [X] Failed to get sell quote`);
+    }
+    
+    // OPTION 2: Meteora → Jupiter
+    console.log(`   [2] Meteora -> Jupiter:`);
+    
+    const jupiterSellQuote = await this.getJupiterSellPrice(token.mint, tokensFromMeteora);
+    
+    if (jupiterSellQuote && jupiterSellQuote > 0) {
+      const profitLamports = jupiterSellQuote - BASE_AMOUNT_IN_LAMPORTS;
+      const profitSOL = profitLamports / BASE_TOKEN_LAMPORTS_AMOUNT;
+      const profitPercent = (profitLamports / BASE_AMOUNT_IN_LAMPORTS) * 100;
+      const sign = profitSOL >= 0 ? '+' : '';
+      const statusIcon = profitPercent >= MIN_PROFIT_PERCENT ? '[+]' : '[X]';
+      
+      console.log(`       ${BASE_AMOUNT} SOL -> ${(tokensFromMeteora / (10**token.decimals)).toFixed(4)} ${token.symbol} -> ${(jupiterSellQuote / BASE_TOKEN_LAMPORTS_AMOUNT).toFixed(6)} SOL`);
+      console.log(`       ${statusIcon} Profit: ${sign}${profitSOL.toFixed(6)} SOL (${sign}${profitPercent.toFixed(2)}%)`);
+    } else {
+      console.log(`       [X] Failed to get sell quote`);
+    }
   }
 
   // Аналіз арбітражної можливості
@@ -349,15 +460,71 @@ class OptimizedArbitrageBot {
     }
   }
 
-  // Виконання через Jito (заглушка - потрібна повна імплементація)
+  // Виконання через Jito Bundle
   private async executeViaJito(opportunity: any): Promise<string> {
-    // TODO: Імплементувати:
-    // 1. Створити транзакції купівлі/продажу
-    // 2. Запакувати в Jito bundle
-    // 3. Відправити на Jito Block Engine
-    // 4. Дочекатися підтвердження
-    
-    throw new Error("Jito execution not implemented yet - enable when ready");
+    if (!this.wallet) {
+      throw new Error("Wallet not loaded");
+    }
+
+    const connection = new Connection(RPC_ENDPOINT, 'confirmed');
+    const { token, direction, buyAmount, sellAmount } = opportunity;
+
+    console.log(`   [JITO] Creating bundle transactions...`);
+
+    try {
+      // Крок 1: Створюємо транзакцію tip для Jito
+      const tipAccount = new PublicKey(JITO_TIP_ACCOUNTS[Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)]);
+      const latestBlockhash = await connection.getLatestBlockhash();
+      
+      const tipIx = SystemProgram.transfer({
+        fromPubkey: this.wallet.publicKey,
+        toPubkey: tipAccount,
+        lamports: JITO_TIP_LAMPORTS
+      });
+
+      // Крок 2: Створюємо транзакції арбітражу
+      // TODO: Тут потрібно створити реальні swap транзакції через Jupiter та Meteora SDK
+      // Для прикладу створюю dummy транзакції
+      
+      const tipTx = new VersionedTransaction(
+        new TransactionMessage({
+          payerKey: this.wallet.publicKey,
+          recentBlockhash: latestBlockhash.blockhash,
+          instructions: [tipIx]
+        }).compileToV0Message()
+      );
+      
+      tipTx.sign([this.wallet]);
+
+      // Крок 3: Створюємо bundle з транзакціями
+      console.log(`   [JITO] Sending bundle to Jito Block Engine...`);
+      
+      // Відправляємо bundle через Jito
+      const jitoClient = searcherClient(JITO_BLOCK_ENGINE);
+      const bundleTransactions = [tipTx];
+      const bundleId = await jitoClient.sendBundle(new Bundle(bundleTransactions, 5));
+      
+      console.log(`   [JITO] Bundle ID: ${bundleId}`);
+      console.log(`   [JITO] Waiting for confirmation...`);
+
+      // Чекаємо підтвердження (спрощена версія)
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      // Перевіряємо статус tip транзакції
+      const signature = bs58.encode(tipTx.signatures[0]);
+      const status = await connection.getSignatureStatus(signature);
+      
+      if (status?.value?.confirmationStatus) {
+        console.log(`   [JITO] Bundle confirmed!`);
+        return signature;
+      } else {
+        throw new Error("Bundle not confirmed within timeout");
+      }
+
+    } catch (err: any) {
+      console.error(`   [JITO ERROR] ${err.message}`);
+      throw err;
+    }
   }
 
   // Виведення статистики

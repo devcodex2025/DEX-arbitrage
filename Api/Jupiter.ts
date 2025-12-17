@@ -18,6 +18,7 @@ export async function getTokenInfoFromJupiter() {
 
 export async function getJupiterQuote(inMint, outMint, amount) {
     try {
+        // API endpoint - той самий для всіх, API ключ іде в заголовках
         const url = `https://api.jup.ag/swap/v1/quote?inputMint=${inMint}&outputMint=${outMint}&amount=${amount}&slippageBps=${SLIPPAGE_BPS}`;
         
         const headers = {
@@ -33,7 +34,7 @@ export async function getJupiterQuote(inMint, outMint, amount) {
         
         if (!res.ok) {
             const errorText = await res.text();
-            console.error(`Jupiter API error ${res.status}: ${errorText.substring(0, 100)}`);
+            console.error(`Jupiter API error ${res.status}: ${errorText.substring(0, 200)}`);
             throw new Error(`Jupiter API error: ${res.status} ${res.statusText}`);
         }
         
@@ -41,6 +42,7 @@ export async function getJupiterQuote(inMint, outMint, amount) {
         return { raw: data, outAmount: data.outAmount ? new Decimal(data.outAmount) : null };
     } catch (err) {
         console.error("Jupiter quote error:", err.message);
+        console.error("Full error:", err);
         return { raw: { error: err.message }, outAmount: null };
     }
 }

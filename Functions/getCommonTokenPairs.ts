@@ -41,8 +41,8 @@ export default async function getCommonTokenPairs(
     .map(t => ({
       ...t,
       meteoraPairAddress: meteoraPairs[t.mint].address,
-    }))
-    .slice(0, 20); // Обмежуємо до 20 токенів для балансу між швидкістю та rate limits
+    }));
+    // Обмеження знято - сканує всі токени з парами
 
   console.log(`✅ Found ${Object.keys(meteoraPairs).length} tokens with pairs on Meteora.`);
   console.log(`✅ Found ${filtered.length} tokens to scan on Jupiter & ${source}.`);

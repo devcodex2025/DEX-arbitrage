@@ -1,10 +1,13 @@
 import fs from "fs";
 import fetch from "node-fetch";
 import { TOKENS_FILE, RPC_ENDPOINT, SLIPPAGE_BPS, BASE_TOKEN_MINT, MAX_TOKEN_PAGES_SCAN } from "../Config/config.js"
-import DLMM from '@meteora-ag/dlmm'
+import * as DLMMModule from '@meteora-ag/dlmm';
 import { Connection, PublicKey } from '@solana/web3.js';
 import BN from "bn.js";
 import { getMint } from "@solana/spl-token";
+
+// @ts-ignore
+const DLMM = DLMMModule.default?.default || DLMMModule.default || DLMMModule;
 
 interface MeteoraPairInfo {
     address: string;
@@ -20,18 +23,23 @@ export async function getMeteoraPairsDLMM(baseMint: string) {
     }
 
     try {
+        console.log("[Meteora DLMM] Loading tokens from file...");
         const allTokens: Token[] = JSON.parse(fs.readFileSync(TOKENS_FILE, "utf-8"));
         const knownMints = new Set(allTokens.map(t => t.mint));
         const tokenToPair: Record<string, MeteoraPairInfo> = {};
 
         const limit = 100;
-        const MAX_PAGES = MAX_TOKEN_PAGES_SCAN; // безпечний максимум
-        const concurrency = 5; // скільки сторінок запитуємо одночасно
+        const MAX_PAGES = 10; // Обмежуємо для швидкості
+        const concurrency = 5;
         let page = 0;
         let keepFetching = true;
 
+        console.log(`[Meteora DLMM] Fetching up to ${MAX_PAGES} pages...`);
+
         while (keepFetching && page < MAX_PAGES) {
             const batchPages = Array.from({ length: concurrency }, (_, i) => page + i);
+            
+            console.log(`[Meteora DLMM] Batch ${Math.floor(page/concurrency) + 1}...`);
 
             const responses = await Promise.allSettled(
                 batchPages.map(p =>
@@ -45,41 +53,46 @@ export async function getMeteoraPairsDLMM(baseMint: string) {
                 const res = responses[i];
                 const currentPage = batchPages[i];
 
-                if (res.status !== "fulfilled") continue;
-
-                const data = await res.value.json();
-                const pairs = data.pairs;
-                const total = data.total;
-
-                if (!pairs || total === 0) continue;
-
-                anyData = true;
-
-                for (const pair of pairs) {
-                    if (pair.mint_y === baseMint && knownMints.has(pair.mint_x)) {
-                        tokenToPair[pair.mint_x] = {
-                            address: pair.address,
-                            liquidity: pair.liquidity
-                        };
-                    }
+                if (res.status !== "fulfilled") {
+                    console.log(`[Meteora DLMM] Page ${currentPage} failed`);
+                    continue;
                 }
 
-                console.log(`page number: ${currentPage}, total pairs: ${total}`);
+                try {
+                    const data = await res.value.json();
+                    const pairs = data.pairs;
+                    const total = data.total;
+
+                    if (!pairs || total === 0) continue;
+
+                    anyData = true;
+
+                    for (const pair of pairs) {
+                        if (pair.mint_y === baseMint && knownMints.has(pair.mint_x)) {
+                            tokenToPair[pair.mint_x] = {
+                                address: pair.address,
+                                liquidity: pair.liquidity
+                            };
+                        }
+                    }
+                } catch (parseErr) {
+                    console.log(`[Meteora DLMM] Failed to parse page ${currentPage}`);
+                }
             }
 
             if (!anyData) {
-                keepFetching = false; // зупиняємося, якщо жодної пари не знайдено
+                keepFetching = false;
             }
 
-            page += concurrency; // переходимо до наступного батчу сторінок
-            await new Promise(r => setTimeout(r, 100)); // коротка пауза між батчами
+            page += concurrency;
+            await new Promise(r => setTimeout(r, 200));
         }
 
-        console.log(`✅ Found ${Object.keys(tokenToPair).length} tokens with pairs on Meteora DLMM.`);
+        console.log(`[Meteora DLMM] ✅ Found ${Object.keys(tokenToPair).length} tokens with DLMM pairs`);
         return tokenToPair;
 
     } catch (err) {
-        console.error("❌ Error fetching Meteora pairs:", (err as Error)?.message ?? err);
+        console.error("[Meteora DLMM] ❌ Error:", (err as Error)?.message ?? err);
         return {};
     }
 }
@@ -93,35 +106,41 @@ interface QuoteResult {
     fee: number;
 }
 
+// Global connection to reuse
+let sharedConnection: Connection | null = null;
+
 export async function getMeteoraQuoteDLMM(
     poolAddress: string,
-    lamportAmount: number
+    amount: number,
+    swapForY: boolean
 ): Promise<BN | null> {
 
-    const poolAdressPubkey = new PublicKey(poolAddress);
-
-    const connection = new Connection(RPC_ENDPOINT, 'confirmed');
-    const dLMMPool = await DLMM.create(connection, poolAdressPubkey);
-    // console.log('DLMM Pool Info:', dLMM);
-    //return null; // тимчасово, поки не налагоджено
-
     try {
-        const inAmount = new BN(lamportAmount);
-        const swapForY = true; // або false, залежно від напрямку свапу
+        // console.log(`   [Meteora DLMM] Fetching pool ${poolAddress.substring(0, 8)}...`);
+        const poolAdressPubkey = new PublicKey(poolAddress);
+
+        if (!sharedConnection) {
+            sharedConnection = new Connection(RPC_ENDPOINT, 'confirmed');
+        }
+        
+        const dLMMPool = await DLMM.create(sharedConnection, poolAdressPubkey);
+        
+        // console.log(`   [Meteora DLMM] Pool created, getting bin arrays...`);
+
+        const inAmount = new BN(amount);
+        // swapForY: true = Token(X) -> SOL(Y)
+        // swapForY: false = SOL(Y) -> Token(X)
         const allowedSlippage = new BN(50); // 0.5% = 50 bps
-        const binArrays = await dLMMPool.getBinArrays(); // масив BinArrayAccount з пулу
+        
+        const binArrays = await dLMMPool.getBinArrays();
+        // console.log(`   [Meteora DLMM] Got ${binArrays.length} bin arrays`);
+        
+        if (!binArrays || binArrays.length === 0) {
+            // console.log(`   [Meteora DLMM] No bin arrays available`);
+            return null;
+        }
 
-        // let totalLiquidity = new BN(0);
-        // for (const bin of binArrays[0].account.bins) { // для простоти беремо перший binArray
-        //     const available = swapForY ? bin.amountX : bin.amountY;
-        //     totalLiquidity = totalLiquidity.add(available);
-        // }
-
-        // if (totalLiquidity.lt(inAmount)) {
-        //     console.log("⚠️ Not enough liquidity in bins for requested amount.");
-        //     return null;
-        // }
-
+        // console.log(`   [Meteora DLMM] Calling swapQuote...`);
         const quote = dLMMPool.swapQuote(
             inAmount,
             swapForY,
@@ -130,11 +149,21 @@ export async function getMeteoraQuoteDLMM(
             true, // isPartialFill
             3      // maxExtraBinArrays
         );
-        // отримуємо кількість Lamports після свапу
-        console.log(`quote:`, quote);
-        return quote.outAmount ?? null;
+        
+        if (!quote.outAmount) {
+            // console.log(`   [Meteora DLMM] No outAmount in quote`);
+            return null;
+        }
+        
+        // console.log(`   [Meteora DLMM] ✅ Quote success: ${quote.outAmount.toString()}`);
+        return quote.outAmount;
+        
     } catch (err: unknown) {
-        console.error('❌ Unexpected error in getMeteoraQuote:', err instanceof Error ? err.message : err);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        // console.log(`   [Meteora DLMM] ❌ Error: ${errorMsg}`);
+        // if (err instanceof Error && err.stack) {
+        //     console.log(`   [Meteora DLMM] Stack: ${err.stack.substring(0, 200)}`);
+        // }
         return null;
     }
 }

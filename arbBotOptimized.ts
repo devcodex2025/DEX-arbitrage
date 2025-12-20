@@ -2,6 +2,7 @@ import fs from "fs";
 import { Connection, Keypair, VersionedTransaction, PublicKey, SystemProgram, TransactionMessage, TransactionInstruction, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { getJupiterQuote } from "./Api/Jupiter.js";
 import { getMeteoraQuoteDAMMV2, getMeteoraPairsDAMMV2 } from "./Api/MeteoraDAMMV2.js";
+import { getMeteoraQuoteDLMM, getMeteoraPairsDLMM } from "./Api/MeteoraDLMM.js";
 import {
   BASE_TOKEN_MINT,
   BASE_TOKEN_SYMBOL,
@@ -122,46 +123,52 @@ class OptimizedArbitrageBot {
       return;
     }
 
-    const tokens = await getCommonTokenPairs(getMeteoraPairsDAMMV2, "MeteoraDAMMV2");
+    // Спробуємо спочатку DLMM (активніші пули), якщо не знайдено - використаємо DAMM V2
+    console.log("Fetching available Meteora DLMM pairs...");
+    let tokens = await getCommonTokenPairs(getMeteoraPairsDLMM, "MeteoraDLMM");
+    
+    if (tokens.length === 0) {
+      console.log("No DLMM pairs found, trying DAMM V2...");
+      tokens = await getCommonTokenPairs(getMeteoraPairsDAMMV2, "MeteoraDAMMV2");
+    }
+    
     console.log(`\n[SCAN] Starting continuous scan with ${tokens.length} tokens...\n`);
 
     // Безкінечний цикл сканування
     while (true) {
       const startTime = Date.now();
       
-      // Обробляємо токени ПОСЛІДОВНО (один токен за раз)
-      // Кожен токен сканується паралельно на Jupiter і Meteora одночасно
-      for (let i = 0; i < tokens.length; i++) {
-        const token = tokens[i];
-        console.log(`\n${"=".repeat(60)}`);
-        console.log(`[${i + 1}/${tokens.length}] ${token.symbol} (${token.mint.slice(0, 8)}...)`);
-        console.log(`${"=".repeat(60)}`);
+      // Обробляємо токени ПАРАЛЕЛЬНО (батчами)
+      const BATCH_SIZE = 3; // Зменшуємо ще більше для стабільності API
+      
+      for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
+        const batch = tokens.slice(i, i + BATCH_SIZE);
+        // console.log(`\n[BATCH] Processing ${i + 1}-${Math.min(i + BATCH_SIZE, tokens.length)} / ${tokens.length}`);
+
+        await Promise.all(batch.map(async (token, index) => {
+            // Більша затримка для розсинхронізації запитів
+            await new Promise(r => setTimeout(r, index * 300));
+            try {
+                // Додаємо timeout 30 секунд для кожного токена
+                await Promise.race([
+                    this.scanAndExecute(token),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Token scan timeout')), 30000))
+                ]);
+            } catch (err: any) {
+                // Silent timeout
+                this.stats.errors++;
+            }
+        }));
         
-        try {
-          // Додаємо timeout 30 секунд для кожного токена
-          await Promise.race([
-            this.scanAndExecute(token),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Token scan timeout')), 30000))
-          ]);
-        } catch (err: any) {
-          if (err.message === 'Token scan timeout') {
-            console.log(`   [!] Timeout - skipping to next token`);
-          } else {
-            console.log(`   [!] Error: ${err.message}`);
-          }
-          this.stats.errors++;
-        }
-        
-        // Затримка між токенами для уникнення rate limit (429)
-        // 1000ms = 1 токен/сек (2 паралельні API calls = ~2 calls/sec загалом)
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Затримка між батчами для відновлення лімітів
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
 
       const cycleTime = Date.now() - startTime;
       this.printStats(cycleTime);
       
       // Короткий відпочинок між циклами
-      await new Promise(r => setTimeout(r, 5000)); // Збільшено до 5 секунд
+      await new Promise(r => setTimeout(r, 2000)); // Швидке повторне сканування
     }
   }
 
@@ -175,23 +182,19 @@ class OptimizedArbitrageBot {
       const TOKEN_LAMPORTS = 10 ** token.decimals;
       
       // Отримуємо ціни ПАРАЛЕЛЬНО з обох бірж одночасно для мінімізації затримки
-      console.log(`   Fetching prices from both exchanges...`);
+      // console.log(`   Fetching prices from both exchanges...`);
       const [jupiterBuyResult, meteoraBuyResult] = await Promise.all([
         this.getJupiterPrice(token.mint, BASE_AMOUNT_IN_LAMPORTS),
         this.getMeteoraPrice(token.meteoraPairAddress, BASE_AMOUNT_IN_LAMPORTS, true)
       ]);
       
-      if (!jupiterBuyResult) {
-        console.log(`   [X] Jupiter: No quote`);
+      if (!jupiterBuyResult || !meteoraBuyResult) {
+        const missing = [];
+        if (!jupiterBuyResult) missing.push("Jupiter");
+        if (!meteoraBuyResult) missing.push("Meteora");
+        console.log(`[${token.symbol}] ⚠️ No quote: ${missing.join(", ")}`);
         return null;
       }
-      console.log(`   [+] Jupiter: ${(jupiterBuyResult / TOKEN_LAMPORTS).toFixed(4)} ${token.symbol}`);
-      
-      if (!meteoraBuyResult) {
-        console.log(`   [X] Meteora: No quote`);
-        return null;
-      }
-      console.log(`   [+] Meteora: ${(meteoraBuyResult / TOKEN_LAMPORTS).toFixed(4)} ${token.symbol}`);
 
       const tokensFromJupiter = jupiterBuyResult;
       const tokensFromMeteora = meteoraBuyResult;
@@ -199,7 +202,7 @@ class OptimizedArbitrageBot {
       // Перевірка на адекватність даних - якщо різниця більше 100x, це bad data
       const ratio = Math.max(tokensFromJupiter, tokensFromMeteora) / Math.min(tokensFromJupiter, tokensFromMeteora);
       if (ratio > 100) {
-        console.log(`   [!] Price difference too large (${ratio.toFixed(0)}x) - likely bad liquidity, skipping...`);
+        console.log(`[${token.symbol}] ⚠️ Bad data (price diff ${ratio.toFixed(0)}x)`);
         return null;
       }
       
@@ -211,8 +214,14 @@ class OptimizedArbitrageBot {
       );
 
       if (!opportunity) {
-        // Виводимо детальний лог НЕприбуткових угод
-        await this.logUnprofitableArbitrage(token, tokensFromJupiter, tokensFromMeteora);
+        // Показуємо потенційний прибуток (навіть якщо мінусовий) в один рядок для моніторингу
+        const diff = ((tokensFromMeteora - tokensFromJupiter) / tokensFromJupiter) * 100;
+        const color = diff > 0 ? "\x1b[32m" : "\x1b[31m"; // Green or Red
+        const reset = "\x1b[0m";
+        
+        // Розрахунок спреду для розуміння ситуації
+        console.log(`[${token.symbol}] Spread: ${color}${diff.toFixed(2)}%${reset} (Jup: ${(tokensFromJupiter/TOKEN_LAMPORTS).toFixed(2)} | Met: ${(tokensFromMeteora/TOKEN_LAMPORTS).toFixed(2)})`);
+        
         return null;
       }
 
@@ -220,6 +229,7 @@ class OptimizedArbitrageBot {
       return await this.executeArbitrage(opportunity);
 
     } catch (err: any) {
+      console.log(`[${token.symbol}] ❌ Error: ${err.message}`);
       this.stats.errors++;
       return null;
     }
@@ -253,17 +263,21 @@ class OptimizedArbitrageBot {
     this.setCachedPrice(cacheKey, result);
     return result;
   }
-  // Отримання ціни Meteora з кешем та timeout
-  private async getMeteoraPrice(pairAddress: string, amount: number, reverse: boolean): Promise<number | null> {
-    const cacheKey = `met_${pairAddress}_${amount}_${reverse}`;
+  // Отримання ціни Meteora з кешем та timeout (використовує DLMM)
+  private async getMeteoraPrice(pairAddress: string, amount: number, isBuy: boolean): Promise<number | null> {
+    const cacheKey = `met_dlmm_${pairAddress}_${amount}_${isBuy}`;
     const cached = this.getCachedPrice(cacheKey);
     if (cached) return cached;
 
     try {
-      // Timeout 10 секунд для Meteora запитів
+      // isBuy=true (SOL->Token) => swapForY=false (Y->X)
+      // isBuy=false (Token->SOL) => swapForY=true (X->Y)
+      const swapForY = !isBuy;
+
+      // Timeout 15 секунд для Meteora DLMM запитів
       const quote = await Promise.race([
-        getMeteoraQuoteDAMMV2(pairAddress, amount, reverse),
-        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+        getMeteoraQuoteDLMM(pairAddress, amount, swapForY),
+        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 15000))
       ]);
       
       if (!quote) {
@@ -286,7 +300,7 @@ class OptimizedArbitrageBot {
     console.log(`\n   --- Checking Arbitrage Profitability ---`);
     
     // OPTION 1: Jupiter → Meteora
-    console.log(`   [1] Jupiter -> Meteora:`);
+    // console.log(`   [1] Jupiter -> Meteora:`);
     
     const meteoraSellQuote = await this.getMeteoraPrice(
       token.meteoraPairAddress!,
@@ -301,14 +315,19 @@ class OptimizedArbitrageBot {
       const sign = profitSOL >= 0 ? '+' : '';
       const statusIcon = profitPercent >= MIN_PROFIT_PERCENT ? '[+]' : '[X]';
       
-      console.log(`       ${BASE_AMOUNT} SOL -> ${(tokensFromJupiter / (10**token.decimals)).toFixed(4)} ${token.symbol} -> ${(meteoraSellQuote / BASE_TOKEN_LAMPORTS_AMOUNT).toFixed(6)} SOL`);
-      console.log(`       ${statusIcon} Profit: ${sign}${profitSOL.toFixed(6)} SOL (${sign}${profitPercent.toFixed(2)}%)`);
+      // console.log(`       ${BASE_AMOUNT} SOL -> ${(tokensFromJupiter / (10**token.decimals)).toFixed(4)} ${token.symbol} -> ${(meteoraSellQuote / BASE_TOKEN_LAMPORTS_AMOUNT).toFixed(6)} SOL`);
+      // console.log(`       ${statusIcon} Profit: ${sign}${profitSOL.toFixed(6)} SOL (${sign}${profitPercent.toFixed(2)}%)`);
+      
+      const color = profitPercent > 0 ? "\x1b[32m" : "\x1b[31m";
+      const reset = "\x1b[0m";
+      console.log(`[${token.symbol}] Jup->Met: ${color}${sign}${profitPercent.toFixed(2)}%${reset} (${sign}${profitSOL.toFixed(5)} SOL)`);
+
     } else {
-      console.log(`       [X] Failed to get sell quote`);
+      // console.log(`       [X] Failed to get sell quote`);
     }
     
     // OPTION 2: Meteora → Jupiter
-    console.log(`   [2] Meteora -> Jupiter:`);
+    // console.log(`   [2] Meteora -> Jupiter:`);
     
     const jupiterSellQuote = await this.getJupiterSellPrice(token.mint, tokensFromMeteora);
     
@@ -319,10 +338,15 @@ class OptimizedArbitrageBot {
       const sign = profitSOL >= 0 ? '+' : '';
       const statusIcon = profitPercent >= MIN_PROFIT_PERCENT ? '[+]' : '[X]';
       
-      console.log(`       ${BASE_AMOUNT} SOL -> ${(tokensFromMeteora / (10**token.decimals)).toFixed(4)} ${token.symbol} -> ${(jupiterSellQuote / BASE_TOKEN_LAMPORTS_AMOUNT).toFixed(6)} SOL`);
-      console.log(`       ${statusIcon} Profit: ${sign}${profitSOL.toFixed(6)} SOL (${sign}${profitPercent.toFixed(2)}%)`);
+      // console.log(`       ${BASE_AMOUNT} SOL -> ${(tokensFromMeteora / (10**token.decimals)).toFixed(4)} ${token.symbol} -> ${(jupiterSellQuote / BASE_TOKEN_LAMPORTS_AMOUNT).toFixed(6)} SOL`);
+      // console.log(`       ${statusIcon} Profit: ${sign}${profitSOL.toFixed(6)} SOL (${sign}${profitPercent.toFixed(2)}%)`);
+
+      const color = profitPercent > 0 ? "\x1b[32m" : "\x1b[31m";
+      const reset = "\x1b[0m";
+      console.log(`[${token.symbol}] Met->Jup: ${color}${sign}${profitPercent.toFixed(2)}%${reset} (${sign}${profitSOL.toFixed(5)} SOL)`);
+
     } else {
-      console.log(`       [X] Failed to get sell quote`);
+      // console.log(`       [X] Failed to get sell quote`);
     }
   }
 

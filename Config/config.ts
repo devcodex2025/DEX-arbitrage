@@ -6,7 +6,7 @@ dotenv.config({ path: path.resolve('./Config/.env') });
 export const JUP_API_KEY: string | undefined = process.env.JUP_API_KEY;
 export const BASE_TOKEN_MINT: string = process.env.BASE_TOKEN_MINT ?? "";
 export const BASE_TOKEN_SYMBOL: string = process.env.BASE_TOKEN_SYMBOL ?? "SOL";
-export const BASE_AMOUNT: number = Number(process.env.BASE_AMOUNT ?? 100);
+export const BASE_AMOUNT: number = Number(process.env.BASE_AMOUNT ?? 250);
 export const SLIPPAGE_BPS: number = Number(process.env.SLIPPAGE_BPS ?? 50);
 export const DELAY_MS: number = process.env.DELAY_MS ? parseInt(process.env.DELAY_MS) : 1200;
 export const TOKENS_FILE: string = "./data/tokens.json";
@@ -21,7 +21,7 @@ export const BASE_AMOUNT_IN_LAMPORTS: number = (10 ** BASE_TOKEN_DECIMALS) * BAS
 // Trading bot configuration
 export const PRIVATE_KEY: string | undefined = process.env.PRIVATE_KEY;
 export const DRY_RUN: boolean = process.env.DRY_RUN !== "false"; // Default to true for safety
-export const MIN_PROFIT_PERCENT: number = Number(process.env.MIN_PROFIT_PERCENT ?? 2);
-export const ESTIMATED_FEES: number = Number(process.env.ESTIMATED_FEES ?? 1.5);
-export const MAX_CONCURRENT_SCANS: number = Number(process.env.MAX_CONCURRENT_SCANS ?? 3);
+export const MIN_PROFIT_PERCENT: number = Number(process.env.MIN_PROFIT_PERCENT ?? 0.5);
+export const ESTIMATED_FEES: number = Number(process.env.ESTIMATED_FEES ?? 0.8);
+export const MAX_CONCURRENT_SCANS: number = Number(process.env.MAX_CONCURRENT_SCANS ?? 5);
 export const PRICE_CACHE_MS: number = Number(process.env.PRICE_CACHE_MS ?? 2000);
